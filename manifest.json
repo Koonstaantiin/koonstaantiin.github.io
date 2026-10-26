@@ -1,0 +1,20 @@
+{
+  "name": "Чомучка-Рація — Дитячий голосовий помічник",
+  "short_name": "Чомучка",
+  "description": "Безекранна голосова рація для дитини 5 років із віковими запобіжниками",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "uk",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

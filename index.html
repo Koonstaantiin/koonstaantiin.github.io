@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Чомучка-Рація">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <title>Чомучка-Рація — Голосовий помічник для дитини 5 років</title>
+  <link rel="stylesheet" href="./css/utilities.css">
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col justify-between overflow-x-hidden">
+
+  <!-- TOP STATUS BAR (Minimalist, non-distracting for child) -->
+  <header class="w-full max-w-md mx-auto px-4 pt-3 pb-1.5 flex items-center justify-between">
+    <!-- Stars / Daily Limit Counter -->
+    <div class="flex items-center gap-2 bg-slate-800/90 border border-slate-700/80 rounded-2xl px-3.5 py-2 shadow-inner" title="Залишок запитань на сьогодні">
+      <div id="starsContainer" class="flex items-center gap-1 text-amber-400 text-lg"><span class="opacity-100">⭐</span><span class="opacity-100">⭐</span><span class="opacity-100">⭐</span><span class="opacity-100">⭐</span><span class="opacity-100">⭐</span></div>
+      <span id="questionsLeftBadge" class="text-xs font-semibold text-slate-300 ml-1">15 / 15</span>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <!-- Voice Guide Button for Child (plays ./audio/ready_intro.wav or ./audio/no_key.wav directly) -->
+      <button id="btnPlayIntroHint" type="button" class="px-3 py-2 rounded-2xl bg-amber-500/20 border border-amber-400/50 text-amber-300 hover:bg-amber-500/30 active:scale-95 transition text-xs font-bold" title="Озвучити підказку для дитини">
+        📢 Підказка
+      </button>
+
+      <!-- Sound Effects Mute Toggle -->
+      <button id="btnMuteSfx" type="button" class="p-2.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 text-slate-300 hover:text-white active:scale-95 transition" title="Звукові сигнали рації">
+        <span id="sfxIcon" class="text-sm font-semibold">🔊 Звук</span>
+      </button>
+
+      <!-- Parent Lock Button (Random math challenge every time) -->
+      <button id="btnParentLock" type="button" class="relative overflow-hidden px-3.5 py-2 rounded-2xl bg-slate-800/90 border border-slate-700/80 text-slate-400 hover:text-slate-200 active:scale-95 transition flex items-center gap-1.5 text-xs font-medium" title="Вхід для батьків">
+        <span>🔒</span>
+        <span>Батькам</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN WALKIE-TALKIE SCREEN (CHILD VIEW) -->
+  <main id="childView" class="flex-1 w-full max-w-md mx-auto px-4 py-1.5 flex flex-col items-center justify-between">
+
+    <!-- DIRECT API KEY BAR ON MAIN SCREEN -->
+    <div id="quickApiKeyCard" class="w-full bg-amber-950/70 border border-amber-500/70 rounded-2xl p-3 mb-2 shadow-md">
+      <p id="quickApiKeyHint" class="text-xs font-bold text-amber-200 mb-1.5">🔑 Вставте ключ Gemini API і натисніть «Підключити» (на GitHub Pages зберігається в localStorage назавжди):</p>
+      <div class="flex gap-1.5">
+        <input id="quickApiKeyInput" type="text" autocomplete="off" spellcheck="false" placeholder="Вставте ключ AIza... сюди" class="flex-1 bg-slate-900 border border-amber-500/60 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-400">
+        <button id="btnPasteKeyClipboard" type="button" class="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-200 font-bold text-xs transition shrink-0" title="Вставити ключ із буфера обміну">
+          📋
+        </button>
+        <button id="btnQuickSaveKey" type="button" class="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-extrabold text-xs transition shrink-0">✅ Підключити</button>
+      </div>
+    </div>
+
+    <!-- Connected Key Pill (shown when key IS active) -->
+    <div id="connectedKeyPill" class="hidden w-full bg-emerald-950/60 border border-emerald-700/60 rounded-2xl px-3 py-1.5 mb-2 flex flex-wrap items-center justify-between gap-1.5 text-xs">
+      <span id="connectedKeyLabel" class="text-emerald-300 font-semibold">✅ Ключ • gemini-3.8-flash</span>
+      <div class="flex items-center gap-2">
+        <button id="btnChangeKeyQuick" type="button" class="text-slate-300 hover:text-white underline text-[11px]">Змінити ключ</button>
+      </div>
+    </div>
+
+    <!-- Walkie-Talkie Speaker Grille & Calm State Indicator -->
+    <div class="w-full bg-slate-800/70 border border-slate-700/70 rounded-3xl p-4 flex flex-col items-center gap-2.5 shadow-lg">
+      <div class="w-36 h-8 speaker-holes rounded-xl opacity-80"></div>
+      <div class="flex items-center gap-2.5">
+        <span id="statusDot" class="w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></span>
+        <span id="statusLabel" class="text-sm font-semibold tracking-wide text-slate-200">Рація готова. Натисни жовту кнопку!</span>
+      </div>
+
+      <!-- Live Microphone Level Bar (visible while recording) -->
+      <div id="micLevelWrapper" class="hidden w-full max-w-xs bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-700">
+        <div id="micLevelBar" class="bg-emerald-400 h-full w-2 transition-all duration-75"></div>
+      </div>
+
+      <!-- Subtle transcript/response card -->
+      <div id="audioTranscriptBox" class="w-full bg-slate-900/70 border border-slate-800 rounded-2xl p-3 text-center transition-all space-y-2">
+        <p id="lastChildText" class="text-xs text-slate-400 italic">Керування за кольорами: 🟡 Жовта — питай, 🔴 Червона — відправляй, 🔵 Синя — повтори</p>
+        <p id="lastAiText" class="text-sm text-amber-200 font-medium leading-snug">«Привіт, малюк! Поклич, будь ласка, маму або тата, щоб вони увімкнули мені чарівний ключик!»</p>
+        <!-- On-screen Audio Player when Gemini TTS generates voice -->
+        <div id="mainAudioPlayerWrap" class="hidden pt-1">
+          <audio id="mainAudioPlayerEl" controls="" class="w-full h-8"></audio>
+        </div>
+      </div>
+
+      <!-- Diagnostic Status Pill -->
+      <div class="w-full flex flex-wrap items-center justify-between gap-1 px-2 pt-0.5 text-[11px] text-slate-400">
+        <span id="diagVoiceStatus" class="text-emerald-400 font-medium">🔊 Студійний 24 кГц WAV + Потік</span>
+        <span id="diagApiStatus" class="text-amber-300 font-semibold">🔑 Очікування ключа • audio/*.wav: 0/6</span>
+      </div>
+
+      <!-- Visible Error Banner if API returns an error on the main screen -->
+      <div id="mainErrorBanner" class="hidden w-full bg-rose-950/90 border border-rose-700/80 rounded-xl px-3 py-2 text-[11px] text-rose-200 leading-relaxed"></div>
+    </div>
+
+    <!-- GIANT TACTILE PUSH-TO-TALK BUTTON (Color-coded for 5-year-old) -->
+    <div class="my-auto py-2.5 flex flex-col items-center justify-center w-full">
+      <button id="btnPushToTalk" type="button" class="w-56 h-56 sm:w-64 sm:h-64 rounded-full bg-gradient-to-b border-[10px] border-slate-800 shadow-[0_14px_35px_rgba(245,158,11,0.35),inset_0_4px_12px_rgba(255,255,255,0.4)] active:scale-95 transition-all duration-150 flex flex-col items-center justify-center gap-2 text-slate-950 focus:outline-none from-amber-400 to-amber-600" aria-label="Натисни і говори">
+        <svg id="micSvgIcon" class="w-16 h-16 text-slate-900" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 1a4 4 0 00-4 4v6a4 4 0 008 0V5a4 4 0 00-4-4z"></path>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 10v1a7 7 0 01-14 0v-1M12 18v4m-4 0h8"></path>
+        </svg>
+        <span id="pttMainText" class="text-xl font-extrabold tracking-tight uppercase">Натисни і питай</span>
+        <span id="pttSubText" class="text-xs font-semibold text-slate-900/80 px-4 text-center">🟡 Жовта — говори • 🔴 Червона — відповідь</span>
+      </button>
+
+      <!-- BRIGHT BLUE Repeat Last Answer Button (Matches voice prompt "натисни синю кнопку знизу") -->
+      <div class="mt-3.5 flex items-center gap-2.5">
+        <button id="btnRepeatAnswer" type="button" class="px-5 py-2.5 rounded-2xl bg-sky-600 hover:bg-sky-500 border-2 border-sky-300 text-white active:scale-95 transition flex items-center gap-2 text-xs sm:text-sm font-extrabold shadow-lg shadow-sky-900/50">
+          <span>🔁</span>
+          <span>Повторити відповідь</span>
+        </button>
+        <button id="btnStopSpeaking" type="button" class="px-4 py-2.5 rounded-2xl bg-rose-900/90 border-2 border-rose-500 text-rose-100 hover:bg-rose-800 active:scale-95 transition text-xs sm:text-sm font-bold shadow hidden">
+          <span>⏹ Стоп</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- SIMULATOR BAR FOR TESTING ALL GUARDRAILS IMMEDIATELY IN CANVAS -->
+    <section id="simulatorSection" class="w-full bg-slate-800/60 border border-slate-700/70 rounded-2xl p-3 mb-2">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-amber-300 uppercase tracking-wider">⚡ Тест сценаріїв та запобіжників (Демо + API)</span>
+        <button id="btnToggleSim" type="button" class="text-xs text-slate-400 hover:text-slate-200 underline">Сховати панель</button>
+      </div>
+      <div id="simulatorControls" class="space-y-2">
+        <div class="grid grid-cols-2 gap-1.5 text-xs">
+          <button type="button" data-sim="apple" class="sim-preset-btn px-2.5 py-2 rounded-xl bg-emerald-950/70 border border-emerald-700/60 text-emerald-200 hover:bg-emerald-900/70 text-left transition">
+            🍏 <b>Чітке питання:</b> «Чому яблуко називається яблуком?»
+          </button>
+          <button type="button" data-sim="phonetic" class="sim-preset-btn px-2.5 py-2 rounded-xl bg-sky-950/70 border border-sky-700/60 text-sky-200 hover:bg-sky-900/70 text-left transition">
+            🐟 <b>Дитяча вимова:</b> «Чому либа плаває у воді?» (либа→риба)
+          </button>
+          <button type="button" data-sim="adult_misheard" class="sim-preset-btn px-2.5 py-2 rounded-xl bg-amber-950/70 border border-amber-700/60 text-amber-200 hover:bg-amber-900/70 text-left transition">
+            🛡️ <b>Запобіжник STT:</b> Почулося доросле/незрозуміле слово
+          </button>
+          <button type="button" data-sim="sensitive" class="sim-preset-btn px-2.5 py-2 rounded-xl bg-rose-950/70 border border-rose-700/60 text-rose-200 hover:bg-rose-900/70 text-left transition">
+            👨‍👩‍👧 <b>Стоп-тема:</b> «Звідки беруться діти?» (До батьків)
+          </button>
+        </div>
+        <!-- Custom test question input -->
+        <div class="flex gap-1.5 pt-1">
+          <input id="customSimInput" type="text" placeholder="Або введіть будь-яку дитячу фразу (UA / RU / EN)..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400">
+          <button id="btnRunCustomSim" type="button" class="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition">
+            Надіслати
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- PARENT GATE MODAL (Randomized Math Challenge every time so 5yo cannot enter) -->
+  <div id="parentGateModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-sm bg-slate-800 border border-slate-700 rounded-3xl p-6 shadow-2xl">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-bold text-white">🔒 Перевірка для батьків</h2>
+        <button id="btnCloseGate" type="button" class="text-slate-400 hover:text-white text-sm font-semibold px-2 py-1">✕ Закрити</button>
+      </div>
+      <p class="text-xs text-slate-300 mb-4">Щоб дитина випадково не змінила налаштування, розв'яжіть випадковий приклад на множення:</p>
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl p-4 text-center mb-4">
+        <span id="mathChallengeText" class="text-2xl font-extrabold text-amber-400 tracking-wider">8 × 7 = ?</span>
+      </div>
+      <div class="flex gap-2">
+        <input id="gateAnswerInput" type="number" inputmode="numeric" placeholder="Відповідь..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-base text-white focus:outline-none focus:border-amber-400">
+        <button id="btnVerifyGate" type="button" class="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm transition">
+          Увійти
+        </button>
+      </div>
+      <p id="gateErrorMsg" class="hidden text-xs text-rose-400 mt-2 font-medium">Неправильна відповідь! Ось новий приклад, спробуйте ще раз.</p>
+    </div>
+  </div>
+
+  <!-- PARENTAL DASHBOARD VIEW -->
+  <section id="parentView" class="hidden flex-1 w-full max-w-2xl mx-auto px-4 py-3 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-800 border border-slate-700 rounded-2xl p-4">
+      <div>
+        <h1 class="text-lg font-bold text-white flex items-center gap-2">⚙️ Батьківський режим «Чомучки»</h1>
+        <p class="text-xs text-slate-400">Налаштування Gemini API, експорт проекту для GitHub Pages (`audio/*.wav` + PWA) та журнал</p>
+      </div>
+      <button id="btnBackToChild" type="button" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow">
+        🎙️ Повернути рацію дитині
+      </button>
+    </div>
+
+    <!-- Tabs inside Parent Mode -->
+    <div class="flex gap-2 border-b border-slate-800 pb-2">
+      <button id="tabBtnLogs" type="button" class="px-3.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs transition">
+        📋 Журнал запитань (<span id="logCountBadge">0</span>)
+      </button>
+      <button id="tabBtnSettings" type="button" class="px-3.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white font-semibold text-xs transition">
+        🔑 API та Мовна політика
+      </button>
+      <button id="tabBtnGuardrails" type="button" class="px-3.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white font-semibold text-xs transition">
+        🛡️ Стоп-теми та Prompt
+      </button>
+    </div>
+
+    <!-- TAB 1: LOGS / JOURNAL -->
+    <div id="parentTabLogs" class="space-y-3">
+      <div class="flex items-center justify-between">
+        <p class="text-xs text-slate-400">Тут видно, що саме запитувала дитина, де спрацював фонетичний рятівник або фільтр дорослих слів.</p>
+        <button id="btnClearLogs" type="button" class="text-xs text-rose-400 hover:text-rose-300 underline font-medium">Очистити історію</button>
+      </div>
+      <div id="logsListContainer" class="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1"><div class="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-6 text-center text-xs text-slate-400">Журнал порожній. Поставте запитання голосом або натисніть одну з тестових кнопок унизу!</div></div>
+    </div>
+
+    <!-- TAB 2: API KEY & GITHUB PAGES + AUDIO/*.WAV + PWA GENERATOR -->
+    <div id="parentTabSettings" class="hidden space-y-4 bg-slate-800/70 border border-slate-700 rounded-2xl p-4">
+      <div>
+        <label for="apiKeyInput" class="block text-xs font-bold text-slate-200 uppercase mb-1">Ключ Gemini API (Google AI Studio — Tier 1 або Free Tier)</label>
+        <div class="flex flex-wrap sm:flex-nowrap gap-2">
+          <input id="apiKeyInput" type="text" autocomplete="off" spellcheck="false" placeholder="AIza... або AQ...." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400">
+          <button id="btnSaveApiKey" type="button" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition">
+            Зберегти
+          </button>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-1">На GitHub Pages введений ключ зберігається локально у <code>localStorage</code> вашого телефона і ніколи не передається у відкритий репозиторій.</p>
+      </div>
+
+      <!-- GITHUB PAGES + PWA + ./audio/*.wav EXPORT STUDIO -->
+      <div class="bg-slate-900/90 border border-amber-500/50 rounded-2xl p-3.5 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-xs font-extrabold text-amber-300 uppercase">🐙 Експорт проекту для GitHub Pages + PWA (прямі файли <code>./audio/*.wav</code>, 24 кГц HD)</h3>
+            <p id="voiceBankStatusText" class="text-[11px] text-amber-200 mt-0.5">🔊 Готово у пам'яті: 0/6 WAV-файлів (24 кГц, 16-біт). Натисніть «🎙️ Озвучити 6 фраз у банк» перед скачуванням для GitHub.</p>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button id="btnGenerateVoiceBankNow" type="button" class="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow">🎙️ Озвучити 6 фраз у банк</button>
+            <button id="btnDownloadBakedHtml" type="button" class="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition shadow">
+              💾 Завантажити HTML із вшитим голосом і ключем
+            </button>
+          </div>
+        </div>
+
+        <!-- Multi-file GitHub Export Buttons (Separate WAVs + PWA files) -->
+        <div class="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800">
+          <button id="btnDownloadAllWavFiles" type="button" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-semibold text-xs transition">
+            🎵 Скачати 6 .wav файлів окремо
+          </button>
+          <button id="btnDownloadPwaFilesOnly" type="button" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-semibold text-xs transition">
+            📲 Скачати index.html + manifest.json + sw.js
+          </button>
+        </div>
+
+        <!-- 6 Individual ./audio/*.wav Preview & Single-File Download Buttons -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-1 text-[11px]">
+          <button type="button" data-prompt-key="NO_KEY" class="prompt-preview-btn px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left text-slate-200 transition">
+            1. 🔑 <code>audio/no_key.wav</code>
+          </button>
+          <button type="button" data-prompt-key="READY_INTRO" class="prompt-preview-btn px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left text-slate-200 transition">
+            2. 🟡 <code>audio/ready_intro.wav</code>
+          </button>
+          <button type="button" data-prompt-key="LISTENING_HINT" class="prompt-preview-btn px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left text-slate-200 transition">
+            3. 🔴 <code>audio/listening_hint.wav</code>
+          </button>
+          <button type="button" data-prompt-key="THINKING_FILLER" class="prompt-preview-btn px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left text-slate-200 transition">
+            4. 🛰️ <code>audio/thinking_filler.wav</code>
+          </button>
+          <button type="button" data-prompt-key="NEXT_ACTION_HINT" class="prompt-preview-btn px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left text-slate-200 transition">
+            5. 🔵 <code>audio/next_action_hint.wav</code>
+          </button>
+          <button type="button" data-prompt-key="DAILY_LIMIT" class="prompt-preview-btn px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left text-slate-200 transition">
+            6. 🌙 <code>audio/daily_limit.wav</code>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-700/70">
+        <div>
+          <label for="modelSelect" class="block text-xs font-bold text-slate-200 mb-1">Модель розуму Gemini</label>
+          <select id="modelSelect" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"><option value="gemini-3.8-flash" selected="">gemini-3.8-flash</option><option value="gemini-3.6-flash">gemini-3.6-flash</option><option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option><option value="gemini-2.5-flash">gemini-2.5-flash</option></select>
+        </div>
+
+        <div>
+          <label for="ttsEngineSelect" class="block text-xs font-bold text-slate-200 mb-1">Двигун озвучення голосу (TTS)</label>
+          <select id="ttsEngineSelect" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+            <option value="auto">⚡ Гібридний потік (SSE Stream + Конвеєр фраз ~0.8 с)</option>
+            <option value="gemini_tts">Тільки хмарний голос Gemini TTS (Потоковий конвеєр)</option>
+            <option value="browser_tts">Тільки системний голос пристрою (Web Speech API)</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="languagePolicySelect" class="block text-xs font-bold text-slate-200 mb-1">Мовна політика (Вхід: UA / RU / EN)</label>
+          <select id="languagePolicySelect" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+            <option value="always_uk">Розуміти UA/RU/EN → Відповідати завжди УКРАЇНСЬКОЮ</option>
+            <option value="match_child">Відповідати тією мовою, якою спитала дитина (UA/RU/EN)</option>
+            <option value="bilingual_en">М'яко додавати 1 англійське словечко у відповідь (Ігрова EN)</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="childAgeSelect" class="block text-xs font-bold text-slate-200 mb-1">Вік дитини та складність</label>
+          <select id="childAgeSelect" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+            <option value="4">4 роки (дуже прості казкові образи, до 2 речень)</option>
+            <option value="5" selected="">5 років (побутові метафори, до 3 коротких речень)</option>
+            <option value="6">6 років (дошкільна логіка + цікаві факти)</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="dailyLimitInput" class="block text-xs font-bold text-slate-200 mb-1">Денний ліміт запитань («Зірочок»)</label>
+          <div class="flex items-center gap-2">
+            <input id="dailyLimitInput" type="number" min="3" max="50" value="15" class="w-24 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+            <button id="btnResetDailyCount" type="button" class="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs text-slate-200 font-medium transition">
+              Поновити зірочки на сьогодні
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-end gap-2">
+          <button id="btnTestVoiceInSettings" type="button" class="flex-1 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-xs transition shadow">
+            🔊 Перевірити озвучення зараз
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Voice Test Result, Audio Player & Diagnostics Box -->
+      <div id="browserVoicesInfo" class="bg-slate-900/90 border border-slate-700 rounded-xl p-3 text-xs text-slate-300 space-y-2"><div>ℹ️ <b>Архітектура для GitHub Pages + PWA:</b> Службові фрази завантажуються напряму з <code>./audio/*.wav</code> (24 кГц, 16-біт WAV без жодної <code>IndexedDB</code>) і кешуються Service Worker-ом (<code>sw.js</code>) для миттєвої роботи офлайн.</div></div>
+      <div id="ttsAudioPreviewContainer" class="hidden bg-slate-900/90 border border-emerald-700/70 rounded-xl p-3 text-xs text-emerald-200 space-y-1.5">
+        <p class="font-semibold">🎵 Згенероване аудіо від Gemini TTS (можна також натиснути Play вручну):</p>
+        <audio id="ttsAudioPlayerEl" controls="" class="w-full h-8"></audio>
+      </div>
+
+      <div class="flex items-center justify-between pt-2 border-t border-slate-700/70">
+        <div>
+          <p class="text-xs font-bold text-slate-200">Показувати текстову підказку на екрані дитини</p>
+          <p class="text-[11px] text-slate-400">Вимкніть для 100% безекранного режиму «справжньої рації»</p>
+        </div>
+        <input id="toggleScreenText" type="checkbox" checked="" class="w-5 h-5 accent-amber-500 rounded cursor-pointer">
+      </div>
+    </div>
+
+    <!-- TAB 3: GUARDRAILS & SYSTEM PROMPT -->
+    <div id="parentTabGuardrails" class="hidden space-y-4 bg-slate-800/70 border border-slate-700 rounded-2xl p-4">
+      <div>
+        <p class="text-xs font-bold text-slate-200 uppercase mb-2">Теми, які рація м'яко перенаправляє до мами й тата (`SENSITIVE_TOPIC`):</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          <label class="flex items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/80">
+            <input type="checkbox" data-topic="Анатомія 18+ та звідки беруться діти" class="topic-checkbox accent-amber-500" checked="">
+            <span>Анатомія 18+ / Звідки беруться діти</span>
+          </label>
+          <label class="flex items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/80">
+            <input type="checkbox" data-topic="Смерть, хвороби та страшилки" class="topic-checkbox accent-amber-500" checked="">
+            <span>Смерть, важкі хвороби, монстри/страшилки</span>
+          </label>
+          <label class="flex items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/80">
+            <input type="checkbox" data-topic="Війна, зброя та насильство" class="topic-checkbox accent-amber-500" checked="">
+            <span>Війна, зброя та насильство</span>
+          </label>
+          <label class="flex items-center gap-2 bg-slate-900/80 p-2.5 rounded-xl border border-slate-700/80">
+            <input type="checkbox" data-topic="Релігія, політика та гроші сім'ї" class="topic-checkbox accent-amber-500" checked="">
+            <span>Релігія, політика та дорослі фінанси</span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label for="familyCustomNote" class="block text-xs font-bold text-slate-200 mb-1">Особливі сімейні правила або ім'я дитини (додається до промпту):</label>
+        <textarea id="familyCustomNote" rows="2" placeholder="Наприклад: Дитину звати Марійка. Якщо питає про песиків — згадай нашого коргі Лакі." class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"></textarea>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3">
+        <p class="text-[11px] font-bold text-amber-400 mb-1">Активна JSON-схема запобіжника (відправляється в Gemini API):</p>
+        <pre class="text-[10px] text-slate-400 overflow-x-auto leading-relaxed">status: "CLEAR_SAFE" | "UNCLEAR_OR_ADULT_MISHEARD" | "SENSITIVE_TOPIC" | "NOISE_OR_EMPTY"
+Правило №1: Якщо почулося доросле/лайливе/нелогічне слово — НІКОЛИ не повторювати його вголос,
+а попросити дитину пояснити іншими словами або назвати колір/дію предмета.</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toastBanner" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 border border-amber-400/60 text-amber-200 px-4 py-2 rounded-2xl shadow-xl text-xs font-semibold text-center max-w-md hidden"></div>
+
+  <!-- OPTIONAL LOCAL SELF-BAKE CONFIG -->
+  <script id="bakedConfigScript">
+    window.__BAKED_API_KEY__ = "";
+    window.__BAKED_HD_PROMPTS_24K__ = {};
+  </script>
+
+  <script src="./js/state.js"></script>
+  <script src="./js/audio.js"></script>
+  <script src="./js/api.js"></script>
+  <script src="./js/tts.js"></script>
+  <script src="./js/gemini.js"></script>
+  <script src="./js/pipeline.js"></script>
+  <script src="./js/recording.js"></script>
+  <script src="./js/ui.js"></script>
+</body>
+</html>
