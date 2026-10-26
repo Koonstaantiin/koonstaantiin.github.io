@@ -1,7 +1,55 @@
     // =========================================================================
     // 6. PROCESSING PIPELINE & UI UPDATES (WITH ./audio/*.wav VOICE CUES)
     // =========================================================================
+    // Phases in which each child-facing action is blocked (checked by UI handlers and startRecording)
+    const ACTION_LOCKED_IN_PHASES = {
+      ptt: ['finishing', 'thinking'],
+      repeat: ['recording', 'finishing', 'thinking', 'speaking'],
+      hint: ['recording', 'finishing', 'thinking', 'speaking'],
+      simulate: ['recording', 'finishing', 'thinking', 'speaking'],
+      parent: ['recording', 'finishing', 'thinking']
+    };
+    const ACTION_CONTROL_SELECTORS = {
+      ptt: '#btnPushToTalk',
+      repeat: '#btnRepeatAnswer',
+      hint: '#btnPlayIntroHint',
+      simulate: '.sim-preset-btn, #btnRunCustomSim, #customSimInput',
+      parent: '#btnParentLock'
+    };
+    // Yellow may interrupt an answer, but not in its first second (accidental double taps)
+    const PTT_INTERRUPT_GRACE_MS = 1000;
+
+    function isActionLocked(action) {
+      if (action === 'ptt' && appPhase === 'speaking') {
+        return Date.now() - phaseEnteredAt < PTT_INTERRUPT_GRACE_MS;
+      }
+      return (ACTION_LOCKED_IN_PHASES[action] || []).includes(appPhase);
+    }
+
+    function applyControlLocks() {
+      Object.keys(ACTION_CONTROL_SELECTORS).forEach(action => {
+        const locked = (ACTION_LOCKED_IN_PHASES[action] || []).includes(appPhase);
+        document.querySelectorAll(ACTION_CONTROL_SELECTORS[action]).forEach(el => {
+          el.classList.toggle('is-locked', locked);
+          el.setAttribute('aria-disabled', locked ? 'true' : 'false');
+        });
+      });
+
+      // Stop doubles as "cancel question" while thinking, so it must stay reachable then
+      const stopBtn = document.getElementById('btnStopSpeaking');
+      if (stopBtn) {
+        if (appPhase === 'thinking' || appPhase === 'speaking') stopBtn.classList.remove('hidden');
+        else if (appPhase !== 'idle') stopBtn.classList.add('hidden');
+      }
+    }
+
     function setWalkieState(mode, message) {
+      const phase = mode === 'listening' ? 'recording' : mode;
+      if (phase !== appPhase) {
+        appPhase = phase;
+        phaseEnteredAt = Date.now();
+      }
+
       const dot = document.getElementById('statusDot');
       const label = document.getElementById('statusLabel');
       const btn = document.getElementById('btnPushToTalk');
@@ -16,7 +64,7 @@
         btn.classList.add('ptt-listening', 'from-rose-500', 'to-rose-600');
         mainTxt.textContent = 'Слухаю тебе...';
         subTxt.textContent = '🔴 Тисни ЧЕРВОНУ кнопку, коли договориш';
-      } else if (mode === 'thinking') {
+      } else if (mode === 'thinking' || mode === 'finishing') {
         dot.className = 'w-3 h-3 rounded-full bg-sky-400 shadow-[0_0_12px_#38bdf8]';
         btn.classList.add('from-sky-400', 'to-sky-600');
         mainTxt.textContent = 'Думаю...';
@@ -32,6 +80,19 @@
         mainTxt.textContent = 'Натисни і питай';
         subTxt.textContent = '🟡 Жовта — говори • 🔴 Червона — відповідь';
       }
+
+      applyControlLocks();
+    }
+
+    // Stop while thinking: drop the question entirely — abort the model request and never speak its answer
+    function cancelCurrentTurn() {
+      if (appPhase === 'thinking') {
+        currentTurnId++;
+        if (activeTurnAbortController) activeTurnAbortController.abort();
+        stopThinkingTicks();
+        isProcessingTurn = false;
+      }
+      stopAllSpeech();
     }
 
     async function handleProcessedResult(resultObj) {
@@ -86,11 +147,16 @@
     async function processChildTurn({ base64Audio = null, mimeType = null, textInput = '', presetKey = null }) {
       if (isProcessingTurn) return;
       isProcessingTurn = true;
+      // Each turn gets an id; a result that arrives after its turn was superseded (watchdog fired) is dropped
+      const myTurnId = ++currentTurnId;
+      const turnAbort = new AbortController();
+      activeTurnAbortController = turnAbort;
 
       updateDiagnosticsBar(true);
 
       if (state.usedToday >= state.dailyLimit) {
         isProcessingTurn = false;
+        setWalkieState('idle', 'Рація відпочиває до завтра');
         document.getElementById('lastAiText').textContent = `«${SYSTEM_PROMPT_TEXTS.DAILY_LIMIT}»`;
         await playSystemPrompt('DAILY_LIMIT', { interruptCurrent: true });
         return;
@@ -109,7 +175,9 @@
       const hadRawAudio = Boolean(base64Audio);
 
       const turnWatchdog = setTimeout(() => {
-        if (isProcessingTurn) {
+        if (isProcessingTurn && myTurnId === currentTurnId) {
+          currentTurnId++;
+          turnAbort.abort();
           stopThinkingTicks();
           isProcessingTurn = false;
           const fallback = simulateGuardrailPipeline(textInput, presetKey, hadRawAudio);
@@ -126,16 +194,19 @@
           result = await callGeminiApi({
             base64Audio,
             mimeType,
-            textInput: textInput || ''
+            textInput: textInput || '',
+            signal: turnAbort.signal
           });
         } else {
           await new Promise(r => setTimeout(r, 350));
           result = simulateGuardrailPipeline(textInput, presetKey, hadRawAudio);
         }
         clearTimeout(turnWatchdog);
+        if (myTurnId !== currentTurnId) return;
         await handleProcessedResult(result);
       } catch (err) {
         clearTimeout(turnWatchdog);
+        if (myTurnId !== currentTurnId) return;
         stopThinkingTicks();
         isProcessingTurn = false;
         const detail = err.message || 'невідома помилка';

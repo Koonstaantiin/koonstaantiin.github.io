@@ -64,6 +64,12 @@
       playTone(349.23, 220, 'sine', 0.15, 150);
     }
 
+    // Soft "wait" cue for taps on a locked control — a silent dead button looks broken to a 5-year-old
+    function sfxBusy() {
+      if (navigator.vibrate) navigator.vibrate(25);
+      playTone(330, 110, 'sine', 0.08, 0);
+    }
+
     function startThinkingTicks() {
       stopThinkingTicks();
       thinkingTimer = setInterval(() => {
@@ -167,7 +173,7 @@
 
             source.onended = () => {
               if (myGenId === currentSpeechGenId) {
-                if (stopBtn && !isProcessingTurn) stopBtn.classList.add('hidden');
+                if (stopBtn && appPhase === 'idle') stopBtn.classList.add('hidden');
                 if (onEnded) onEnded();
               }
             };
@@ -258,13 +264,13 @@
         for (let i = 0; i < missingKeys.length; i++) {
           const k = missingKeys[i];
           const text = SYSTEM_PROMPT_TEXTS[k];
-          const dummyGenId = currentSpeechGenId;
-          const res = await fetchSegmentPcmWithStream(text, apiKey, dummyGenId, null);
+          // null genId: playing/stopping speech (voice test, prompt preview) must not abort the bank
+          const res = await fetchSegmentPcmWithStream(text, apiKey, null, null);
           if (res.ok && res.pcmBytes && res.pcmBytes.byteLength > 0) {
             wavPcmBank24k[k] = res.pcmBytes;
             updateVoiceBankUiStatus();
 
-            if (k === 'READY_INTRO' && playReadyIntroWhenDone && !isRecording && !isProcessingTurn) {
+            if (k === 'READY_INTRO' && playReadyIntroWhenDone && appPhase === 'idle') {
               playSystemPrompt('READY_INTRO', { interruptCurrent: true });
             }
           }
@@ -340,7 +346,7 @@
     }
 
     function buildPwaServiceWorkerJsString() {
-      return `const CACHE_NAME = 'chomuchka-pwa-v3';
+      return `const CACHE_NAME = 'chomuchka-pwa-v5';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

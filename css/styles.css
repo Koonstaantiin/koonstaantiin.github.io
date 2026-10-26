@@ -35,3 +35,9 @@ input, textarea, select, pre, code {
   background-image: radial-gradient(rgba(15, 23, 42, 0.35) 22%, transparent 24%);
   background-size: 16px 16px;
 }
+/* Control temporarily unavailable in the current walkie phase (aria-disabled keeps taps for "wait" feedback) */
+.is-locked {
+  opacity: 0.4;
+  filter: grayscale(0.6);
+  cursor: not-allowed;
+}

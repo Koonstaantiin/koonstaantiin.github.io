@@ -115,10 +115,12 @@
         document.getElementById('lastAiText').textContent = `«${SYSTEM_PROMPT_TEXTS.NO_KEY}»`;
       }
 
-      document.body.addEventListener('pointerdown', () => {
+      document.body.addEventListener('pointerdown', (e) => {
         if (!hasPlayedStartupGreeting) {
           hasPlayedStartupGreeting = true;
           ensureAudioCtx();
+          // A first tap on a control starts its own audio — a greeting on top would be a second voice
+          if (e.target.closest('button, input, select, textarea, audio, label')) return;
           if (!getActiveApiKey() && wavPcmBank24k.NO_KEY) {
             playSystemPrompt('NO_KEY', { interruptCurrent: false });
           } else if (getActiveApiKey() && wavPcmBank24k.READY_INTRO && !isRecording && !isProcessingTurn) {
@@ -126,6 +128,21 @@
           }
         }
       }, { once: true });
+
+      // Native <audio controls> play buttons must silence everything else (answers, prompts, the other player)
+      HTML_AUDIO_PLAYER_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('play', () => {
+          if (el === activeHtmlAudio) return; // started by the app itself, already exclusive
+          stopAllSpeech({ except: el });
+          activeHtmlAudio = el;
+        });
+        // Also fires when playback reaches the end
+        el.addEventListener('pause', () => {
+          if (activeHtmlAudio === el) activeHtmlAudio = null;
+        });
+      });
 
       const quickInputEl = document.getElementById('quickApiKeyInput');
       quickInputEl.addEventListener('focus', () => {
@@ -174,8 +191,16 @@
         quickInputEl.select();
       });
 
+      // Returns true (and plays the "wait" cue) when the action is blocked in the current walkie phase
+      const rejectIfLocked = (action) => {
+        if (!isActionLocked(action)) return false;
+        sfxBusy();
+        return true;
+      };
+
       document.getElementById('btnPlayIntroHint').addEventListener('click', () => {
         ensureAudioCtx();
+        if (rejectIfLocked('hint')) return;
         if (getActiveApiKey()) {
           document.getElementById('lastAiText').textContent = `«${SYSTEM_PROMPT_TEXTS.READY_INTRO}»`;
           playSystemPrompt('READY_INTRO', { interruptCurrent: true });
@@ -223,6 +248,7 @@
         e.preventDefault();
         if (Date.now() - lastPttActionTimestamp < 450) return;
         ensureAudioCtx();
+        if (!isRecording && rejectIfLocked('ptt')) return;
         if (!isRecording && !isStartingMic) {
           lastPttActionTimestamp = Date.now();
           startRecording();
@@ -239,11 +265,12 @@
 
       document.getElementById('btnRepeatAnswer').addEventListener('click', () => {
         ensureAudioCtx();
+        if (rejectIfLocked('repeat')) return;
         speakText(lastSpokenResponse, 'uk', false, false);
       });
 
       document.getElementById('btnStopSpeaking').addEventListener('click', () => {
-        stopAllSpeech();
+        cancelCurrentTurn();
       });
 
       document.getElementById('btnMuteSfx').addEventListener('click', () => {
@@ -255,6 +282,7 @@
       document.querySelectorAll('.sim-preset-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           ensureAudioCtx();
+          if (rejectIfLocked('simulate')) return;
           const preset = btn.getAttribute('data-sim');
           const defaultTexts = {
             apple: 'Чому яблуко називається яблуком?',
@@ -268,6 +296,7 @@
 
       document.getElementById('btnRunCustomSim').addEventListener('click', () => {
         ensureAudioCtx();
+        if (rejectIfLocked('simulate')) return;
         const input = document.getElementById('customSimInput');
         const val = input.value.trim();
         if (!val) {
@@ -292,6 +321,9 @@
       });
 
       document.getElementById('btnParentLock').addEventListener('click', () => {
+        if (rejectIfLocked('parent')) return;
+        // Allowed while speaking — but the answer must not keep talking behind the parent screen
+        if (appPhase === 'speaking') stopAllSpeech();
         generateNewMathChallenge();
         document.getElementById('gateAnswerInput').value = '';
         document.getElementById('gateErrorMsg').classList.add('hidden');

@@ -59,7 +59,7 @@
       return JSON.parse(raw);
     }
 
-    async function callGeminiApi({ base64Audio, mimeType, textInput }) {
+    async function callGeminiApi({ base64Audio, mimeType, textInput, signal = null }) {
       const apiKey = getActiveApiKey();
       const parts = [];
       if (base64Audio) {
@@ -77,10 +77,16 @@
       const defaultChain = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
       const modelsToTry = [...new Set([state.model, ...discoveredTextModels, ...defaultChain])].filter(m => m && !m.startsWith('gemini-2.0'));
 
+      // Whole model chain must finish before the 24 s turn watchdog in processChildTurn
+      const deadline = Date.now() + 20000;
       const modelErrors = [];
       for (const modelId of modelsToTry) {
+        const remainingMs = deadline - Date.now();
+        if ((signal && signal.aborted) || remainingMs < 1500) break;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 22000);
+        const timeoutId = setTimeout(() => controller.abort(), remainingMs);
+        const onTurnAbort = () => controller.abort();
+        if (signal) signal.addEventListener('abort', onTurnAbort, { once: true });
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
           const response = await fetch(url, {
@@ -130,10 +136,12 @@
         } catch (err) {
           clearTimeout(timeoutId);
           modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
+        } finally {
+          if (signal) signal.removeEventListener('abort', onTurnAbort);
         }
       }
 
-      throw new Error(modelErrors[0] || 'Не вдалося виконати запит до Gemini API');
+      throw new Error(modelErrors[0] || 'Не вдалося виконати запит до Gemini API (час вичерпано)');
     }
 
     function simulateGuardrailPipeline(rawInput, presetKey = null, hadRawAudioBlob = false) {

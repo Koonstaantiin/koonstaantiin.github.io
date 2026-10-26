@@ -71,6 +71,11 @@
     let lastPttActionTimestamp = 0;
     let recordingTimerInterval = null;
     let isProcessingTurn = false;
+    let currentTurnId = 0;
+    let activeTurnAbortController = null;
+    // Walkie phase drives control locks: idle | recording | finishing | thinking | speaking
+    let appPhase = 'idle';
+    let phaseEnteredAt = 0;
     let mediaRecorder = null;
     let activeStream = null;
     let audioChunks = [];
@@ -85,6 +90,7 @@
     let activeAudioSources = [];
     let activeTtsAbortControllers = [];
     let activeHtmlAudio = null;
+    const HTML_AUDIO_PLAYER_IDS = ['mainAudioPlayerEl', 'ttsAudioPlayerEl'];
     let cachedWorkingTtsConfig = null;
     let lastFirstAudioLatencySec = null;
     const ttsReplayCache = new Map();

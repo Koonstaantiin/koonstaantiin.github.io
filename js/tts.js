@@ -8,15 +8,29 @@
       }
     }
 
-    function stopAllSpeech() {
-      currentSpeechGenId++;
+    // Safety net: if a source's onended never fires (e.g. iOS suspends the AudioContext),
+    // the 'speaking' phase would keep controls locked forever — force idle shortly after playback should end.
+    function armSpeakingWatchdog(remainingSec, myGenId) {
       clearSpeechWatchdog();
+      speechWatchdogTimer = setTimeout(() => {
+        speechWatchdogTimer = null;
+        if (myGenId !== currentSpeechGenId || appPhase !== 'speaking') return;
+        const stopBtn = document.getElementById('btnStopSpeaking');
+        if (stopBtn) stopBtn.classList.add('hidden');
+        setWalkieState('idle', '🟡 Жовта — нове питання • 🔵 Синя — повторити');
+      }, (Math.max(0, remainingSec) + 3) * 1000);
+    }
 
+    function abortActiveTtsRequests() {
       while (activeTtsAbortControllers.length > 0) {
         const ctrl = activeTtsAbortControllers.pop();
         try { ctrl.abort(); } catch (e) {}
       }
+    }
 
+    // Silences every audio output (Web Audio sources, both <audio> players, browser TTS)
+    // without touching generation ids or UI — so exactly one voice can be heard at a time.
+    function stopActivePlayback(exceptEl = null) {
       while (activeAudioSources.length > 0) {
         const src = activeAudioSources.pop();
         try {
@@ -25,22 +39,31 @@
         } catch (e) {}
       }
 
-      if (activeHtmlAudio) {
+      HTML_AUDIO_PLAYER_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || el === exceptEl) return;
         try {
-          activeHtmlAudio.onended = null;
-          activeHtmlAudio.pause();
-          activeHtmlAudio.currentTime = 0;
+          el.onended = null;
+          el.pause();
+          el.currentTime = 0;
         } catch (e) {}
-        activeHtmlAudio = null;
-      }
+      });
+      if (activeHtmlAudio !== exceptEl) activeHtmlAudio = null;
 
       if ('speechSynthesis' in window) {
         try { window.speechSynthesis.cancel(); } catch (e) {}
       }
+    }
+
+    function stopAllSpeech({ except = null } = {}) {
+      currentSpeechGenId++;
+      clearSpeechWatchdog();
+      abortActiveTtsRequests();
+      stopActivePlayback(except);
 
       const stopBtn = document.getElementById('btnStopSpeaking');
       if (stopBtn) stopBtn.classList.add('hidden');
-      if (!isRecording && !isProcessingTurn) {
+      if (!isRecording && !isProcessingTurn && appPhase !== 'finishing') {
         setWalkieState('idle', 'Рація готова. Натисни жовту кнопку!');
       }
     }
@@ -78,13 +101,24 @@
     async function fetchSegmentPcmWithStream(segmentText, apiKey, myGenId, onStreamChunkPcm = null) {
       const candidates = getCandidateTtsConfigs();
       const errors = [];
+      // myGenId === null: background synthesis (voice bank) that must survive speech interruptions
+      const isCancelled = () => myGenId !== null && myGenId !== currentSpeechGenId;
 
       for (const cfg of candidates) {
-        if (myGenId !== currentSpeechGenId) return { ok: false, aborted: true };
+        if (isCancelled()) return { ok: false, aborted: true };
 
         const controller = new AbortController();
-        activeTtsAbortControllers.push(controller);
+        if (myGenId !== null) activeTtsAbortControllers.push(controller);
         const timer = setTimeout(() => controller.abort(), 14000);
+        const collectedPcmParts = [];
+        let streamedToPlayer = false;
+        const emitChunk = (pcm) => {
+          collectedPcmParts.push(pcm);
+          if (onStreamChunkPcm) {
+            streamedToPlayer = true;
+            onStreamChunkPcm(pcm, cfg.modelName);
+          }
+        };
 
         try {
           const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.modelName)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
@@ -115,8 +149,6 @@
             continue;
           }
 
-          const collectedPcmParts = [];
-
           if (res.body && typeof res.body.getReader === 'function') {
             const reader = res.body.getReader();
             const decoder = new TextDecoder('utf-8');
@@ -125,7 +157,7 @@
             while (true) {
               const { value, done } = await reader.read();
               if (done) break;
-              if (myGenId !== currentSpeechGenId) {
+              if (isCancelled()) {
                 try { reader.cancel(); } catch (e) {}
                 clearTimeout(timer);
                 return { ok: false, aborted: true };
@@ -145,12 +177,7 @@
                   for (const p of parts) {
                     if (p.inlineData && p.inlineData.data) {
                       const pcm = base64ToRawPcmBytes(p.inlineData.data);
-                      if (pcm.byteLength > 0) {
-                        collectedPcmParts.push(pcm);
-                        if (onStreamChunkPcm) {
-                          onStreamChunkPcm(pcm, cfg.modelName);
-                        }
-                      }
+                      if (pcm.byteLength > 0) emitChunk(pcm);
                     }
                   }
                 } catch (parseErr) {}
@@ -169,12 +196,7 @@
                 for (const p of parts) {
                   if (p.inlineData && p.inlineData.data) {
                     const pcm = base64ToRawPcmBytes(p.inlineData.data);
-                    if (pcm.byteLength > 0) {
-                      collectedPcmParts.push(pcm);
-                      if (onStreamChunkPcm) {
-                        onStreamChunkPcm(pcm, cfg.modelName);
-                      }
-                    }
+                    if (pcm.byteLength > 0) emitChunk(pcm);
                   }
                 }
               } catch (e) {}
@@ -190,7 +212,11 @@
           }
         } catch (e) {
           clearTimeout(timer);
-          if (myGenId !== currentSpeechGenId) return { ok: false, aborted: true };
+          if (isCancelled()) return { ok: false, aborted: true };
+          // Part of this segment is already playing — retrying with another model would repeat it
+          if (streamedToPlayer) {
+            return { ok: true, partial: true, pcmBytes: concatPcmByteArrays(collectedPcmParts, 0), modelName: cfg.modelName };
+          }
           errors.push(`${cfg.modelName}: ${e.message || 'помилка потоку'}`);
         }
       }
@@ -202,12 +228,15 @@
       const apiKey = getActiveApiKey();
       if (!apiKey) return { ok: false, error: 'Ключ API не введено' };
 
+      // Invalidate the previous answer's in-flight TTS; its audio keeps playing (e.g. the thinking filler)
+      // until this answer's first chunk is ready, then stopActivePlayback() cuts it.
       const myGenId = ++currentSpeechGenId;
+      abortActiveTtsRequests();
+      clearSpeechWatchdog();
       const startTimestamp = performance.now();
       ensureAudioCtx();
 
       const stopBtn = document.getElementById('btnStopSpeaking');
-      const mainWrap = document.getElementById('mainAudioPlayerWrap');
       const mainPlayer = document.getElementById('mainAudioPlayerEl');
       const previewWrap = document.getElementById('ttsAudioPreviewContainer');
       const playerEl = document.getElementById('ttsAudioPlayerEl');
@@ -230,19 +259,18 @@
           }
         };
         hintSource.start(hintStartAt);
-        return true;
+        return hintStartAt + hintBuf.duration;
       };
 
       // 0. Check instant in-memory replay cache
       if (ttsReplayCache.has(text)) {
         const cached = ttsReplayCache.get(text);
         const audioBuf = pcmBytesToAudioBufferSync(cached.pcmBytes, 24000);
-        if (mainWrap && mainPlayer) {
-          mainWrap.classList.remove('hidden');
-          mainPlayer.src = cached.blobUrl;
-        }
+        if (mainPlayer) mainPlayer.src = cached.blobUrl;
         if (audioBuf && audioCtx) {
           if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
+          if (myGenId !== currentSpeechGenId) return { ok: false, aborted: true };
+          stopActivePlayback();
           const src = audioCtx.createBufferSource();
           src.buffer = audioBuf;
           src.connect(audioCtx.destination);
@@ -251,7 +279,9 @@
           setWalkieState('speaking', '⚡ Рація відповідає (з миттєвого кешу 0.01 с)...');
 
           const endAt = audioCtx.currentTime + audioBuf.duration;
-          const hasTrailingHint = scheduleTrailingNextActionHint(endAt);
+          const hintEndAt = scheduleTrailingNextActionHint(endAt);
+          const hasTrailingHint = Boolean(hintEndAt);
+          armSpeakingWatchdog((hintEndAt || endAt) - audioCtx.currentTime, myGenId);
 
           src.onended = () => {
             if (!hasTrailingHint && myGenId === currentSpeechGenId) {
@@ -289,10 +319,7 @@
 
         if (!firstAudioStarted) {
           firstAudioStarted = true;
-          while (activeAudioSources.length > 0) {
-            const oldSrc = activeAudioSources.pop();
-            try { oldSrc.onended = null; oldSrc.stop(); } catch (e) {}
-          }
+          stopActivePlayback();
           lastFirstAudioLatencySec = ((performance.now() - startTimestamp) / 1000).toFixed(1);
           stopBtn.classList.remove('hidden');
           setWalkieState('speaking', `⚡ Рація говорить (старт за ${lastFirstAudioLatencySec} с)...`);
@@ -332,8 +359,16 @@
 
       if (myGenId !== currentSpeechGenId) return { ok: false, aborted: true };
       if (!seg1Res.ok) {
+        // Some audio is already audible — falling back to browser TTS would read the answer twice
+        if (firstAudioStarted) {
+          allSegmentsDispatched = true;
+          armSpeakingWatchdog(nextPlayTime - audioCtx.currentTime, myGenId);
+          checkAllPlaybackFinished();
+          return { ok: true, partial: true };
+        }
         return { ok: false, error: seg1Res.error || 'Помилка синтезу фрази 1' };
       }
+      let isCompleteAudio = !seg1Res.partial;
 
       if (segments.length > 1 && !seg2Promise) {
         seg2Promise = fetchSegmentPcmWithStream(segments[1], apiKey, myGenId, null);
@@ -354,6 +389,8 @@
         if (seg2Res.ok && seg2Res.pcmBytes && seg2Res.pcmBytes.byteLength > 0) {
           allSegmentPcms.push(seg2Res.pcmBytes);
           schedulePcmImmediately(seg2Res.pcmBytes, seg2Res.modelName);
+        } else {
+          isCompleteAudio = false;
         }
       }
 
@@ -377,29 +414,34 @@
       }
 
       allSegmentsDispatched = true;
+      if (firstAudioStarted) armSpeakingWatchdog(nextPlayTime - audioCtx.currentTime, myGenId);
 
       const fullPcm = concatPcmByteArrays(allSegmentPcms, 65, 24000);
       const fullWavBuffer = pcmBytesToWavArrayBuffer(fullPcm, 24000);
       const wavBlob = new Blob([fullWavBuffer], { type: 'audio/wav' });
       const blobUrl = URL.createObjectURL(wavBlob);
 
-      if (ttsReplayCache.size >= 10) {
-        const oldestKey = ttsReplayCache.keys().next().value;
-        ttsReplayCache.delete(oldestKey);
+      // Don't cache a truncated answer — the next replay should re-synthesize it fully
+      if (isCompleteAudio) {
+        if (ttsReplayCache.size >= 10) {
+          const oldestKey = ttsReplayCache.keys().next().value;
+          ttsReplayCache.delete(oldestKey);
+        }
+        ttsReplayCache.set(text, { pcmBytes: fullPcm, blobUrl });
       }
-      ttsReplayCache.set(text, { pcmBytes: fullPcm, blobUrl });
 
-      if (mainWrap && mainPlayer) {
-        mainWrap.classList.remove('hidden');
-        mainPlayer.src = blobUrl;
-      }
+      // The child screen keeps its <audio> player hidden (blue button replays); the settings preview stays visible
+      if (mainPlayer) mainPlayer.src = blobUrl;
       if (previewWrap && playerEl) {
         previewWrap.classList.remove('hidden');
         playerEl.src = blobUrl;
       }
 
       if (!firstAudioStarted && mainPlayer) {
+        stopActivePlayback();
         activeHtmlAudio = mainPlayer;
+        setWalkieState('speaking', 'Рація відповідає...');
+        armSpeakingWatchdog(fullPcm.byteLength / (24000 * 2), myGenId);
         stopBtn.classList.remove('hidden');
         mainPlayer.onended = () => {
           activeHtmlAudio = null;
@@ -569,10 +611,14 @@
       }
 
       try {
+        const myGenId = currentSpeechGenId;
+        clearSpeechWatchdog();
         if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
           window.speechSynthesis.cancel();
           await new Promise(r => setTimeout(r, 60));
         }
+        if (myGenId !== currentSpeechGenId) return;
+        stopActivePlayback();
         window.speechSynthesis.resume();
 
         const targetLang = state.languagePolicy === 'always_uk'

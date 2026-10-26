@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chomuchka-pwa-v3';
+const CACHE_NAME = 'chomuchka-pwa-v5';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

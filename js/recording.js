@@ -91,7 +91,7 @@
     }
 
     async function startRecording() {
-      if (isRecording || isStartingMic || isProcessingTurn) return;
+      if (isRecording || isStartingMic || isProcessingTurn || isActionLocked('ptt')) return;
 
       const quickEl = document.getElementById('quickApiKeyInput');
       if (quickEl && quickEl.value.trim().length >= 10) {
@@ -188,6 +188,8 @@
       isRecording = false;
       lastPttActionTimestamp = Date.now();
       const stoppedSessionId = recordingSessionId;
+      // Locks controls during the gap until processChildTurn takes over (blob flush + base64 can take ~3 s)
+      setWalkieState('finishing', '⏳ Обробляю запис...');
       sfxStopListening();
       stopMicLevelMeter();
 
