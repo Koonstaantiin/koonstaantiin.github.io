@@ -263,6 +263,28 @@
         }
       });
 
+      document.getElementById('btnOpenCamera').addEventListener('click', () => {
+        ensureAudioCtx();
+        if (rejectIfLocked('camera')) return;
+        openChildCameraModal('photo_pisa');
+      });
+
+      document.getElementById('btnCloseCamera').addEventListener('click', () => {
+        closeChildCameraModal();
+      });
+
+      document.getElementById('btnTakePhoto').addEventListener('click', () => {
+        takeCameraPhoto();
+      });
+
+      document.querySelectorAll('.camera-scene-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          ensureAudioCtx();
+          const scene = btn.getAttribute('data-scene') || 'photo_pisa';
+          selectCameraScene(scene);
+        });
+      });
+
       document.getElementById('btnRepeatAnswer').addEventListener('click', () => {
         ensureAudioCtx();
         if (rejectIfLocked('repeat')) return;
@@ -284,6 +306,23 @@
           ensureAudioCtx();
           if (rejectIfLocked('simulate')) return;
           const preset = btn.getAttribute('data-sim');
+          if (preset === 'photo_pisa' && typeof drawVirtualSceneToCanvas === 'function') {
+            sfxCameraShutter();
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 640;
+            tempCanvas.height = 480;
+            drawVirtualSceneToCanvas('photo_pisa', tempCanvas);
+            const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.86);
+            const base64Image = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
+            processChildTurn({
+              base64Image: base64Image || null,
+              imageMimeType: 'image/jpeg',
+              photoPreviewDataUrl: dataUrl,
+              textInput: VIRTUAL_CAMERA_SCENES.photo_pisa.autoPrompt,
+              presetKey: 'photo_pisa'
+            });
+            return;
+          }
           const defaultTexts = {
             apple: 'Чому яблуко називається яблуком?',
             phonetic: 'Чому либа плаває у воді?',

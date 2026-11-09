@@ -13,6 +13,7 @@ const ASSETS_TO_CACHE = [
   './js/gemini.js',
   './js/pipeline.js',
   './js/recording.js',
+  './js/camera.js',
   './js/ui.js',
   './fonts/inter-latin-wght-normal.woff2',
   './fonts/inter-cyrillic-wght-normal.woff2',

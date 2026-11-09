@@ -9,15 +9,18 @@
           : 'Відповідай тією мовою (UA, RU або EN), якою запитала дитина.');
 
       return `Ти — доброзичлива «Чомучка-Рація» для дитини віком ${state.childAge} років.
-Проаналізуй аудіо або текст дитини, застосуй вікові запобіжники і поверни ВИКЛЮЧНО валідний JSON-об'єкт з такими полями:
+Проаналізуй аудіо, зроблене дитиною фото або текст дитини, застосуй вікові запобіжники і поверни ВИКЛЮЧНО валідний JSON-об'єкт з такими полями:
 {
-  "heard_transcript": "що буквально почулося",
-  "reconstructed_intent": "як ти зрозумів дитячий задум",
+  "heard_transcript": "що буквально почулося або що зображено на фото",
+  "reconstructed_intent": "як ти зрозумів дитячий задум або опис сфотографованого предмета",
   "detected_language": "uk" | "ru" | "en" | "mixed",
   "safety_status": "CLEAR_SAFE" | "UNCLEAR_OR_ADULT_MISHEARD" | "SENSITIVE_TOPIC" | "NOISE_OR_EMPTY",
   "flagged_word_or_reason": "причина спрацювання запобіжника або порожній рядок",
   "spoken_response": "готова відповідь для озвучення дитині (2-3 коротких речення)"
 }
+
+ПРАВИЛА ДЛЯ ФОТОКАМЕРИ ДИТИНИ:
+- Якщо передано зображення (фото з камери дитини), у полі heard_transcript коротко напиши «📷 Фото: [назва об'єкта]», у reconstructed_intent — про що розповісти дитині, а в spoken_response — радісно похвали фото і цікаво та просто розкажи про зображений предмет чи місце!
 
 ПРАВИЛА ДЛЯ ШВИДКОГО КОНВЕЄРНОГО ОЗВУЧЕННЯ (ВАЖЛИВО):
 - Перше речення у полі spoken_response ЗАВЖДИ роби дуже коротким та живим (3–5 слів зі знаком оклику, наприклад: «Ого, яке чудове питання!», «Зараз відкрию тобі секрет!», «Ой, рація трохи зашуміла!»), щоб перший голосовий чанк згенерувався миттєво менш ніж за секунду!
@@ -59,10 +62,20 @@
       return JSON.parse(raw);
     }
 
-    async function callGeminiApi({ base64Audio, mimeType, textInput, signal = null }) {
+    async function callGeminiApi({ base64Audio, mimeType, base64Image = null, imageMimeType = null, textInput, signal = null }) {
       const apiKey = getActiveApiKey();
       const parts = [];
-      if (base64Audio) {
+      if (base64Image) {
+        parts.push({
+          inlineData: {
+            mimeType: imageMimeType || 'image/jpeg',
+            data: base64Image
+          }
+        });
+        parts.push({
+          text: textInput || 'Дитина щойно зробила це фото. Подивися на зображення, назви що на ньому, і цікаво та просто розкажи про це дитині у форматі JSON.'
+        });
+      } else if (base64Audio) {
         parts.push({
           inlineData: {
             mimeType: (mimeType || 'audio/webm').split(';')[0],
@@ -147,6 +160,61 @@
     function simulateGuardrailPipeline(rawInput, presetKey = null, hadRawAudioBlob = false) {
       const text = (rawInput || '').trim();
       const lower = text.toLowerCase();
+
+      if (presetKey === 'photo_pisa' || lower.includes('пізанськ') || lower.includes('pisa')) {
+        return {
+          heard_transcript: '📷 Фото: Пізанська вежа в Італії',
+          reconstructed_intent: 'Розкажи дитині про знамениту похилу Пізанську вежу на фотографії',
+          detected_language: 'uk',
+          safety_status: 'CLEAR_SAFE',
+          flagged_word_or_reason: '',
+          spoken_response: 'Вау, яке чудове фото! Це знаменита Пізанська вежа в сонячній Італії! Коли її будували багато років тому, м\'яка земля під нею трохи просіла на один бік, тому вежа кумедно нахилилася, ніби зазирає вниз, але будівельники міцно її закріпили, щоб вона ніколи не впала!'
+        };
+      }
+
+      if (presetKey === 'photo_dino') {
+        return {
+          heard_transcript: '📷 Фото: Добрий зелений динозавр',
+          reconstructed_intent: 'Розкажи дитині про динозавра на фотографії',
+          detected_language: 'uk',
+          safety_status: 'CLEAR_SAFE',
+          flagged_word_or_reason: '',
+          spoken_response: 'Ого, ти сфотографував справжнього динозавра! Такі велетні жили на Землі мільйони років тому, мали довгу шию і ласували соковитим листям із найвищих дерев. Якби він жив сьогодні, то міг би зазирнути просто у твоє вікно!'
+        };
+      }
+
+      if (presetKey === 'photo_truck') {
+        return {
+          heard_transcript: '📷 Фото: Червона пожежна машина',
+          reconstructed_intent: 'Розкажи дитині про пожежну машину на фотографії',
+          detected_language: 'uk',
+          safety_status: 'CLEAR_SAFE',
+          flagged_word_or_reason: '',
+          spoken_response: 'Ух ти, яка яскрава червона пожежна машина! Вона має гучну сирену, мигалку на даху та довгу-предовгу драбину, щоб сміливі рятувальники могли швидко загасити вогонь і врятувати навіть кошеня з високого дерева!'
+        };
+      }
+
+      if (presetKey === 'photo_cat') {
+        return {
+          heard_transcript: '📷 Фото: Пухнастий рудий котик',
+          reconstructed_intent: 'Розкажи дитині про котика на фотографії',
+          detected_language: 'uk',
+          safety_status: 'CLEAR_SAFE',
+          flagged_word_or_reason: '',
+          spoken_response: 'Який милий пухнастий котик на твоєму фото! Котики мають чутливі вуса, якими вони вимірюють простір навколо себе, а коли їм затишно й радісно, вони вмикають свій теплий моторчик і ніжно муркочуть!'
+        };
+      }
+
+      if (presetKey === 'photo_camera') {
+        return {
+          heard_transcript: '📷 Фото з дитячої камери',
+          reconstructed_intent: 'Опис сфотографованого кадру з камери дитини',
+          detected_language: 'uk',
+          safety_status: 'CLEAR_SAFE',
+          flagged_word_or_reason: '',
+          spoken_response: 'Який класний кадр у тебе вийшов! Ти справжній юний фотограф, який помічає найцікавіші речі навколо себе. Спробуй сфотографувати ще щось яскраве!'
+        };
+      }
 
       if (presetKey === 'apple' || lower.includes('яблук') || lower.includes('яблок') || lower.includes('apple')) {
         return {

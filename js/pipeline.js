@@ -4,6 +4,7 @@
     // Phases in which each child-facing action is blocked (checked by UI handlers and startRecording)
     const ACTION_LOCKED_IN_PHASES = {
       ptt: ['finishing', 'thinking'],
+      camera: ['recording', 'finishing', 'thinking', 'speaking'],
       repeat: ['recording', 'finishing', 'thinking', 'speaking'],
       hint: ['recording', 'finishing', 'thinking', 'speaking'],
       simulate: ['recording', 'finishing', 'thinking', 'speaking'],
@@ -11,6 +12,7 @@
     };
     const ACTION_CONTROL_SELECTORS = {
       ptt: '#btnPushToTalk',
+      camera: '#btnOpenCamera',
       repeat: '#btnRepeatAnswer',
       hint: '#btnPlayIntroHint',
       simulate: '.sim-preset-btn, #btnRunCustomSim, #customSimInput',
@@ -144,7 +146,15 @@
       await speakText(resultObj.spoken_response, resultObj.detected_language, false, true);
     }
 
-    async function processChildTurn({ base64Audio = null, mimeType = null, textInput = '', presetKey = null }) {
+    async function processChildTurn({
+      base64Audio = null,
+      mimeType = null,
+      base64Image = null,
+      imageMimeType = null,
+      photoPreviewDataUrl = null,
+      textInput = '',
+      presetKey = null
+    }) {
       if (isProcessingTurn) return;
       isProcessingTurn = true;
       // Each turn gets an id; a result that arrives after its turn was superseded (watchdog fired) is dropped
@@ -154,6 +164,17 @@
 
       updateDiagnosticsBar(true);
 
+      const photoWrapEl = document.getElementById('lastPhotoPreviewWrap');
+      const photoImgEl = document.getElementById('lastPhotoImg');
+      if (photoWrapEl && photoImgEl) {
+        if (photoPreviewDataUrl) {
+          photoImgEl.src = photoPreviewDataUrl;
+          photoWrapEl.classList.remove('hidden');
+        } else {
+          photoWrapEl.classList.add('hidden');
+        }
+      }
+
       if (state.usedToday >= state.dailyLimit) {
         isProcessingTurn = false;
         setWalkieState('idle', 'Рація відпочиває до завтра');
@@ -162,7 +183,7 @@
         return;
       }
 
-      setWalkieState('thinking', '🛰️ Рація питає у космічного супутника...');
+      setWalkieState('thinking', base64Image ? '📸 Розглядаю твоє фото...' : '🛰️ Рація питає у космічного супутника...');
 
       // Immediately play ./audio/thinking_filler.wav in 0.00s while Gemini API thinks!
       if (wavPcmBank24k.THINKING_FILLER) {
@@ -190,10 +211,12 @@
         if (presetKey && !hasKey) {
           await new Promise(r => setTimeout(r, 350));
           result = simulateGuardrailPipeline(textInput, presetKey, false);
-        } else if (hasKey && (base64Audio || textInput || presetKey)) {
+        } else if (hasKey && (base64Image || base64Audio || textInput || presetKey)) {
           result = await callGeminiApi({
             base64Audio,
             mimeType,
+            base64Image,
+            imageMimeType,
             textInput: textInput || '',
             signal: turnAbort.signal
           });

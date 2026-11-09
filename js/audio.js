@@ -70,6 +70,14 @@
       playTone(330, 110, 'sine', 0.08, 0);
     }
 
+    // Crisp two-click mechanical shutter sound when child snaps a photo
+    function sfxCameraShutter() {
+      if (navigator.vibrate) navigator.vibrate([35, 30, 45]);
+      playTone(1200, 45, 'triangle', 0.16, 0);
+      playTone(900, 65, 'sine', 0.14, 55);
+      playTone(1567.98, 110, 'sine', 0.12, 125);
+    }
+
     function startThinkingTicks() {
       stopThinkingTicks();
       thinkingTimer = setInterval(() => {
@@ -334,6 +342,7 @@
       'js/gemini.js',
       'js/pipeline.js',
       'js/recording.js',
+      'js/camera.js',
       'js/ui.js',
       'fonts/inter-latin-wght-normal.woff2',
       'fonts/inter-cyrillic-wght-normal.woff2'
@@ -361,6 +370,7 @@ const ASSETS_TO_CACHE = [
   './js/gemini.js',
   './js/pipeline.js',
   './js/recording.js',
+  './js/camera.js',
   './js/ui.js',
   './fonts/inter-latin-wght-normal.woff2',
   './fonts/inter-cyrillic-wght-normal.woff2',

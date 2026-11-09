@@ -82,7 +82,10 @@
 
       <!-- Subtle transcript/response card -->
       <div id="audioTranscriptBox" class="w-full bg-slate-900/70 border border-slate-800 rounded-2xl p-3 text-center transition-all space-y-2">
-        <p id="lastChildText" class="text-xs text-slate-400 italic">Керування за кольорами: 🟡 Жовта — питай, 🔴 Червона — відправляй, 🔵 Синя — повтори</p>
+        <div id="lastPhotoPreviewWrap" class="hidden pb-1">
+          <img id="lastPhotoImg" src="" alt="Зроблене фото дитини" class="photo-thumb-img">
+        </div>
+        <p id="lastChildText" class="text-xs text-slate-400 italic">Керування за кольорами: 🟡 Жовта — питай, 🔴 Червона — відправляй, 🟢 Зелена — фото, 🔵 Синя — повтори</p>
         <p id="lastAiText" class="text-sm text-amber-200 font-medium leading-snug">«Привіт, малюк! Поклич, будь ласка, маму або тата, щоб вони увімкнули мені чарівний ключик!»</p>
         <!-- On-screen Audio Player when Gemini TTS generates voice -->
         <div id="mainAudioPlayerWrap" class="hidden pt-1">
@@ -111,8 +114,12 @@
         <span id="pttSubText" class="text-xs font-semibold text-slate-900/80 px-4 text-center">🟡 Жовта — говори • 🔴 Червона — відповідь</span>
       </button>
 
-      <!-- BRIGHT BLUE Repeat Last Answer Button (Matches voice prompt "натисни синю кнопку знизу") -->
-      <div class="mt-3.5 flex items-center gap-2.5">
+      <!-- BRIGHT ACTION ROW: Camera (Green) + Repeat Last Answer (Blue) + Stop (Red) -->
+      <div class="mt-3.5 flex flex-wrap items-center justify-center gap-2.5">
+        <button id="btnOpenCamera" type="button" class="px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 active:scale-95 transition flex items-center gap-2 text-xs sm:text-sm font-extrabold shadow-lg">
+          <span>📷</span>
+          <span>Зробити фото</span>
+        </button>
         <button id="btnRepeatAnswer" type="button" class="px-5 py-2.5 rounded-2xl bg-sky-600 hover:bg-sky-500 border-2 border-sky-300 text-white active:scale-95 transition flex items-center gap-2 text-xs sm:text-sm font-extrabold shadow-lg shadow-sky-900/50">
           <span>🔁</span>
           <span>Повторити відповідь</span>
@@ -143,6 +150,9 @@
           <button type="button" data-sim="sensitive" class="sim-preset-btn px-2.5 py-2 rounded-xl bg-rose-950/70 border border-rose-700/60 text-rose-200 hover:bg-rose-900/70 text-left transition">
             👨‍👩‍👧 <b>Стоп-тема:</b> «Звідки беруться діти?» (До батьків)
           </button>
+          <button type="button" data-sim="photo_pisa" class="sim-preset-btn col-span-2 px-2.5 py-2 rounded-xl bg-amber-950/70 border border-amber-500/60 text-amber-200 hover:bg-amber-900/70 text-left transition">
+            🗼 <b>Віртуальне фото:</b> Сфотографувати «Пізанську вежу» та описати її дитині
+          </button>
         </div>
         <!-- Custom test question input -->
         <div class="flex gap-1.5 pt-1">
@@ -154,6 +164,50 @@
       </div>
     </section>
   </main>
+
+  <!-- CHILD PHOTO CAMERA MODAL (Single-shot virtual or real camera, non-live) -->
+  <div id="cameraModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-slate-800 border border-slate-700 rounded-3xl p-4 shadow-2xl space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base font-extrabold text-amber-300 flex items-center gap-2">📷 Дитяча фотокамера «Чомучки»</h2>
+        <button id="btnCloseCamera" type="button" class="text-slate-300 hover:text-white text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700">✕ Закрити</button>
+      </div>
+
+      <!-- Camera / Virtual Scene Viewfinder -->
+      <div class="camera-viewfinder">
+        <video id="cameraVideoEl" autoplay="" playsinline="" muted="" class="hidden"></video>
+        <canvas id="cameraSceneCanvas" width="640" height="480"></canvas>
+        <div id="cameraFlashOverlay" class="hidden fixed inset-0 bg-white z-50"></div>
+      </div>
+
+      <p id="cameraSceneCaption" class="text-xs text-slate-300 text-center font-medium">🖼️ Віртуальний кадр: Пізанська вежа (Італія) — натисни кнопку, щоб сфотографувати!</p>
+
+      <!-- Scene Switcher Buttons (Virtual Cards + Real Device Camera) -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs">
+        <button type="button" data-scene="photo_pisa" class="camera-scene-btn camera-scene-active px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 transition">
+          🗼 Пізанська вежа
+        </button>
+        <button type="button" data-scene="photo_dino" class="camera-scene-btn px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 transition">
+          🦖 Динозавр
+        </button>
+        <button type="button" data-scene="photo_truck" class="camera-scene-btn px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 transition">
+          🚒 Пожежна
+        </button>
+        <button type="button" data-scene="photo_cat" class="camera-scene-btn px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 transition">
+          🐱 Котик
+        </button>
+        <button type="button" data-scene="live_cam" class="camera-scene-btn px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-300 transition">
+          📷 Справжня камера
+        </button>
+      </div>
+
+      <!-- Giant Shutter Button for Child -->
+      <button id="btnTakePhoto" type="button" class="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-extrabold text-base transition shadow-lg flex items-center justify-center gap-2">
+        <span>📸</span>
+        <span>Сфотографувати і послухати!</span>
+      </button>
+    </div>
+  </div>
 
   <!-- PARENT GATE MODAL (Randomized Math Challenge every time so 5yo cannot enter) -->
   <div id="parentGateModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
@@ -391,6 +445,7 @@
   <script src="./js/gemini.js"></script>
   <script src="./js/pipeline.js"></script>
   <script src="./js/recording.js"></script>
+  <script src="./js/camera.js"></script>
   <script src="./js/ui.js"></script>
 </body>
 </html>

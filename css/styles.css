@@ -41,3 +41,37 @@ input, textarea, select, pre, code {
   filter: grayscale(0.6);
   cursor: not-allowed;
 }
+
+/* Child Camera Viewfinder & Scene Selector */
+.camera-viewfinder {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background-color: #020617;
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 2px solid #334155;
+}
+.camera-viewfinder video,
+.camera-viewfinder canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.camera-scene-active {
+  background-color: #f59e0b !important;
+  color: #020617 !important;
+  border-color: #fde047 !important;
+  font-weight: 800;
+}
+.photo-thumb-img {
+  max-height: 7.5rem;
+  width: auto;
+  margin-left: auto;
+  margin-right: auto;
+  border-radius: 0.75rem;
+  border: 2px solid rgba(251, 191, 36, 0.6);
+}
+.col-span-2 {
+  grid-column: span 2 / span 2;
+}
