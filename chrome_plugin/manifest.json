@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "ШІ-редактор та Виправлення (Чомучка Tools)",
+  "short_name": "ШІ-редактор",
+  "version": "1.0.0",
+  "description": "Бічна панель Chrome для виправлення тексту, підсвітки змін (Word-Diff), пояснення правил та перемикання стилів (Default / Short / Formal / Corp) в 1 запит.",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "contextMenus",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Відкрити ШІ-редактор у бічній панелі"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

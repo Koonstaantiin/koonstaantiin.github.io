@@ -355,7 +355,7 @@
     }
 
     function buildPwaServiceWorkerJsString() {
-      return `const CACHE_NAME = 'chomuchka-pwa-v5';
+      return `const CACHE_NAME = 'chomuchka-pwa-v4';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

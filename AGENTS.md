@@ -32,6 +32,7 @@
 | `js/camera.js` | 8 | Single-shot child photo camera & virtual canvas scenes (`VIRTUAL_CAMERA_SCENES`, `openChildCameraModal()`, `closeChildCameraModal()`, `selectCameraScene()`, `takeCameraPhoto()`, `drawVirtualSceneToCanvas()`). |
 | `js/ui.js` | 9 | DOM rendering & `DOMContentLoaded` listeners (`renderStarsAndCounters()`, `renderLogsList()`, `switchParentTab()`, `escapeHtml()`). |
 | `sw.js` | — | Service Worker caching `ASSETS_TO_CACHE` for offline PWA support. |
+| `chrome_plugin/*` | — | Standalone Chrome Side Panel Extension (`manifest.json`, `background.js`, `sidepanel.html`, `sidepanel.css`, `tools.js`) for AI Proofreading & 4-Style Rewrite (`default`, `short`, `formal`, `corp`). |
 
 ---
 

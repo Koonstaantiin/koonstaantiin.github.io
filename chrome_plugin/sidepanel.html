@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ШІ-редактор та Виправлення</title>
+  <link rel="stylesheet" href="./sidepanel.css">
+</head>
+<body data-sidepanel-standalone="true">
+  <div class="sidepanel-root">
+    <!-- Sticky Sidebar Header + Collapsible API Key Drawer -->
+    <header class="sp-header">
+      <div class="sp-header-top">
+        <div class="sp-brand">
+          <span class="sp-brand-icon">✨</span>
+          <div>
+            <div class="sp-brand-title">ШІ-редактор</div>
+            <div class="sp-brand-sub">1 запит → 4 стилі + правила</div>
+          </div>
+        </div>
+        <div class="sp-header-actions">
+          <button id="btnToggleCamC1C2" type="button" class="ext-btn-cam ext-btn-cam-active" aria-pressed="true" title="Суворий режим Cambridge C1/C2 (CAE/CPE): перевіряє всі 12 розділів поглибленої граматики (Unreal Past, Modal Idioms, Inversion, Subjunctive, Conditionals, Collocations)">
+            🎓 C1/C2: ON
+          </button>
+          <button id="btnGrabPageSelection" type="button" class="ext-btn-secondary" title="Взяти виділений мишкою текст з активної вкладки">
+            📥 Зі сторінки
+          </button>
+        </div>
+      </div>
+
+      <details id="extApiKeyDetails" class="sp-key-details" open>
+        <summary class="sp-key-summary">
+          <span>🔑 Gemini API та модель</span>
+          <span id="extKeyStatusBadge" class="text-[10px] text-amber-300 font-semibold">🔴 Ключ не введено ▾</span>
+        </summary>
+        <div class="sp-key-body">
+          <div class="flex gap-1.5">
+            <input id="extApiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Ключ AIza... з Google AI Studio" class="ext-input">
+            <button id="btnExtSaveKey" type="button" class="ext-btn-save">Зберегти</button>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <label for="extModelSelect" class="text-[11px] text-slate-400 font-medium">Модель:</label>
+            <select id="extModelSelect" class="ext-input">
+              <option value="gemini-3.8-flash" selected>gemini-3.8-flash (Швидка)</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Легка)</option>
+              <option value="gemini-4-argon">gemini-4-argon (Глибока)</option>
+              <option value="gemini-4-carbon">gemini-4-carbon (Макс)</option>
+            </select>
+          </div>
+        </div>
+      </details>
+    </header>
+
+    <!-- Main Sidebar Content -->
+    <main class="sp-main">
+      <!-- Editor Card -->
+      <section class="ai-editor-shell">
+        <!-- 4-Style Segmented Switcher (Default / Short / Formal / Corp) -->
+        <div class="style-variant-bar" role="tablist" aria-label="Стиль результату">
+          <button type="button" data-style-variant="default" class="style-variant-btn style-variant-btn-active" title="Стандартне виправлення зі збереженням тону">
+            🔍 Стандарт
+          </button>
+          <button type="button" data-style-variant="short" class="style-variant-btn" title="Короткий та лаконічний варіант">
+            ⚡ Short
+          </button>
+          <button type="button" data-style-variant="formal" class="style-variant-btn" title="Офіційно-діловий стиль">
+            🎩 Formal
+          </button>
+          <button type="button" data-style-variant="corp" class="style-variant-btn" title="Корпоративний стиль для робочих чатів і листів">
+            💼 Corp
+          </button>
+        </div>
+
+        <!-- Compact Presets + Diff Mode Toggle Row -->
+        <div class="sp-toolbar-row">
+          <div class="sp-presets-group" aria-label="Швидкі приклади">
+            <button type="button" data-preset="uk_parent_note" class="proofread-preset-btn ext-chip-btn" title="Український приклад: повідомлення вчителю">🇺🇦 Пр. 1</button>
+            <button type="button" data-preset="en_team_note" class="proofread-preset-btn ext-chip-btn" title="Англійський приклад: робоче повідомлення">🇬🇧 Пр. 2</button>
+            <button type="button" data-preset="uk_story" class="proofread-preset-btn ext-chip-btn" title="Український приклад: пізнавальна нотатка">🇺🇦 Пр. 3</button>
+          </div>
+          <div class="sp-diff-toggle" role="group" aria-label="Режим підсвітки">
+            <button id="btnDiffModeWavy" type="button" class="px-2 py-0.5 rounded-md bg-sky-500/20 border border-sky-400/60 text-sky-300 font-bold text-[10px] transition">
+              〰️ Чистий
+            </button>
+            <button id="btnDiffModeInline" type="button" class="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-400 font-medium text-[10px] transition">
+              Було → Стало
+            </button>
+          </div>
+        </div>
+
+        <!-- Stacked Оригінал & Результат Card -->
+        <div class="ai-editor-boxes-card">
+          <!-- BOX 1: Оригінал -->
+          <div class="sp-box-section">
+            <div class="sp-box-header">
+              <label for="proofreadOriginalInput" class="sp-box-title">Оригінал</label>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-slate-400">Ctrl+Enter</span>
+                <button id="btnClearOriginal" type="button" class="sp-clear-btn" title="Очистити поле вводу">✕</button>
+              </div>
+            </div>
+            <textarea id="proofreadOriginalInput" rows="3" spellcheck="false" placeholder="Введіть або вставте текст..." class="proofread-textarea"></textarea>
+          </div>
+
+          <div class="sp-box-divider"></div>
+
+          <!-- BOX 2: Результат -->
+          <div class="sp-box-section">
+            <div class="sp-box-header">
+              <div class="flex items-center gap-1.5">
+                <span class="sp-box-title">Результат</span>
+                <span id="proofreadChangesCountBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 border border-sky-700/70">0 змін</span>
+              </div>
+              <button id="btnCopyProofread" type="button" title="Скопіювати активний варіант у буфер обміну" class="ext-copy-btn">
+                📋 Копіювати
+              </button>
+            </div>
+            <div id="proofreadResultBox" class="proofread-result-text"></div>
+          </div>
+        </div>
+
+        <!-- Active Style Explanation Note -->
+        <div id="proofreadStyleNote" class="sp-style-note"></div>
+
+        <!-- Primary Action CTA -->
+        <button id="btnRunProofread" type="button" class="ext-btn-primary">
+          🔍 Перевірити та виправити
+        </button>
+        <p id="proofreadSummaryText" class="sp-summary-text"></p>
+      </section>
+
+      <!-- Applied Rules Breakdown -->
+      <section class="ai-editor-shell sp-rules-section">
+        <div class="sp-rules-header">
+          <span class="text-[11px] font-extrabold text-amber-300 uppercase">📚 Застосовані правила</span>
+          <span class="text-[10px] text-slate-400">Наведіть для підсвітки</span>
+        </div>
+        <div id="proofreadRulesContainer" class="space-y-2"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast Banner -->
+  <div id="extToastBanner" class="sp-toast hidden"></div>
+
+  <script src="./tools.js"></script>
+</body>
+</html>
