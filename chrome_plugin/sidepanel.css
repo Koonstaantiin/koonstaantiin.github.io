@@ -368,9 +368,88 @@ body {
   margin: 0;
 }
 
-/* Applied Rules Section in Narrow Sidebar */
+/* Applied Rules, Grammar Explanation & Page Assistant Section in Narrow Sidebar */
 .sp-rules-section {
-  gap: 0.45rem;
+  gap: 0.5rem;
+}
+
+.sp-analysis-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  background-color: #0f172a;
+  padding: 0.22rem;
+  border-radius: 0.65rem;
+  border: 1px solid #263548;
+}
+
+@container sidepanel (max-width: 340px) {
+  .sp-analysis-tabs {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sp-analysis-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.38rem 0.25rem;
+  border-radius: 0.45rem;
+  cursor: pointer;
+  transition: all 0.14s ease;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-analysis-tab:hover {
+  color: #e2e8f0;
+  background-color: rgba(30, 41, 59, 0.7);
+}
+
+.sp-analysis-tab-active {
+  background-color: #1e3a5f !important;
+  color: #38bdf8 !important;
+  border-color: rgba(56, 189, 248, 0.45) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.sp-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.05rem;
+  padding: 0 0.28rem;
+  border-radius: 9999px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  background-color: rgba(15, 23, 42, 0.85);
+  color: #cbd5e1;
+  border: 1px solid rgba(100, 116, 139, 0.4);
+  flex-shrink: 0;
+}
+
+.sp-analysis-tab-active .sp-tab-badge {
+  background-color: rgba(8, 47, 73, 0.95);
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.sp-selection-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background-color: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.85);
+  flex-shrink: 0;
 }
 
 .sp-rules-header {
@@ -378,6 +457,148 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
+}
+
+/* Tab 2: Grammar Explanation Overview & Construction Cards */
+.grammar-overview-card {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.92), rgba(8, 47, 73, 0.35));
+  border: 1px solid rgba(56, 189, 248, 0.38);
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.grammar-overview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.grammar-overview-label {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #38bdf8;
+}
+
+.grammar-overview-value {
+  font-size: 0.7rem;
+  color: #f1f5f9;
+  line-height: 1.4;
+}
+
+.grammar-formula-box {
+  font-size: 0.68rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background-color: rgba(2, 6, 23, 0.88);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #bae6fd;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.45rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.grammar-item-card {
+  background-color: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  border-radius: 0.65rem;
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.grammar-item-card:hover {
+  background-color: #0f172a;
+  border-color: rgba(56, 189, 248, 0.55);
+}
+
+.grammar-fragment-chip {
+  font-size: 0.69rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background-color: rgba(2, 6, 23, 0.9);
+  border: 1px solid #1e293b;
+  color: #7dd3fc;
+  padding: 0.22rem 0.45rem;
+  border-radius: 0.4rem;
+  word-break: break-word;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+/* Tab 3: Selection-Aware Page Assistant */
+.sp-page-context-bar {
+  font-size: 0.66rem;
+  color: #cbd5e1;
+  background-color: rgba(15, 23, 42, 0.75);
+  border: 1px solid #1e293b;
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.sp-selection-priority-card {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(14, 165, 233, 0.12));
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 0.6rem;
+  padding: 0.45rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.sp-selection-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.sp-selection-badge {
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: #fde68a;
+}
+
+.sp-selection-ignore-btn {
+  background-color: rgba(15, 23, 42, 0.75);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.35rem;
+  padding: 0.12rem 0.38rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sp-selection-ignore-btn:hover {
+  color: #ffffff;
+  border-color: #94a3b8;
+}
+
+.sp-selection-preview-text {
+  font-size: 0.68rem;
+  color: #f8fafc;
+  font-style: italic;
+  line-height: 1.4;
+  background-color: rgba(2, 6, 23, 0.65);
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.45rem;
+  max-height: 4.5rem;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.sp-assistant-answer {
+  max-height: 22rem;
+  overflow-y: auto;
 }
 
 .proofread-rule-card {

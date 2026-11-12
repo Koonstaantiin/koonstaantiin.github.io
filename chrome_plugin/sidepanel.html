@@ -15,7 +15,7 @@
           <span class="sp-brand-icon">✨</span>
           <div>
             <div class="sp-brand-title">ШІ-редактор</div>
-            <div class="sp-brand-sub">1 запит → 4 стилі + правила</div>
+            <div class="sp-brand-sub">4 стилі • Граматика • Page AI</div>
           </div>
         </div>
         <div class="sp-header-actions">
@@ -129,13 +129,109 @@
         <p id="proofreadSummaryText" class="sp-summary-text"></p>
       </section>
 
-      <!-- Applied Rules Breakdown -->
+      <!-- 3-Tab Analysis & Page Assistant Section -->
       <section class="ai-editor-shell sp-rules-section">
-        <div class="sp-rules-header">
-          <span class="text-[11px] font-extrabold text-amber-300 uppercase">📚 Застосовані правила</span>
-          <span class="text-[10px] text-slate-400">Наведіть для підсвітки</span>
+        <div class="sp-analysis-tabs" role="tablist" aria-label="Аналіз та асистент сторінки">
+          <button id="btnTabAppliedRules" type="button" data-analysis-tab="rules" class="sp-analysis-tab sp-analysis-tab-active" role="tab" aria-selected="true" title="Застосовані правила виправлення">
+            <span>📚 Застосовані правила</span>
+            <span id="appliedRulesTabBadge" class="sp-tab-badge">0</span>
+          </button>
+          <button id="btnTabGrammarExplanation" type="button" data-analysis-tab="grammar" class="sp-analysis-tab" role="tab" aria-selected="false" title="Grammar explanation — повний граматичний розбір речення">
+            <span>🧬 Grammar explanation</span>
+            <span id="grammarExplanationTabBadge" class="sp-tab-badge">0</span>
+          </button>
+          <button id="btnTabPageAssistant" type="button" data-analysis-tab="page" class="sp-analysis-tab" role="tab" aria-selected="false" title="Page Assistant — запитання по поточній сторінці або виділеному тексту">
+            <span>🌐 Page AI</span>
+            <span id="pageSelectionActiveDot" class="sp-selection-dot hidden" title="Виділено текст на сторінці"></span>
+          </button>
         </div>
-        <div id="proofreadRulesContainer" class="space-y-2"></div>
+
+        <!-- TAB 1 PANEL: Застосовані правила -->
+        <div id="proofreadRulesPanel" class="space-y-2">
+          <div class="sp-rules-header">
+            <span class="text-[11px] font-extrabold text-amber-300 uppercase">📚 Застосовані правила</span>
+            <span class="text-[10px] text-slate-400">Наведіть для підсвітки</span>
+          </div>
+          <div id="proofreadRulesContainer" class="space-y-2"></div>
+        </div>
+
+        <!-- TAB 2 PANEL: Grammar explanation -->
+        <div id="grammarExplanationPanel" class="space-y-2 hidden">
+          <div class="sp-rules-header">
+            <span class="text-[11px] font-extrabold text-sky-300 uppercase">🧬 Grammar explanation</span>
+            <span class="text-[10px] text-slate-400">Структура та граматика речення</span>
+          </div>
+          <div id="grammarExplanationContainer" class="space-y-2"></div>
+        </div>
+
+        <!-- TAB 3 PANEL: Page Assistant (Selection-Aware) -->
+        <div id="pageAssistantPanel" class="space-y-2.5 hidden">
+          <div class="sp-rules-header">
+            <span class="text-[11px] font-extrabold text-emerald-300 uppercase">🌐 Page Assistant</span>
+            <button id="btnRefreshPageContext" type="button" class="ext-chip-btn" title="Зчитати актуальний текст та виділення з активної вкладки">
+              🔄 Оновити контекст
+            </button>
+          </div>
+
+          <!-- Active Page Metadata Bar -->
+          <div id="pageAssistantContextMeta" class="sp-page-context-bar">
+            📄 Контекст активної сторінки зчитується автоматично
+          </div>
+
+          <!-- Auto-Detected Page Selection Priority Card -->
+          <div id="pageAssistantSelectionCard" class="sp-selection-priority-card hidden">
+            <div class="sp-selection-card-header">
+              <span class="sp-selection-badge">🎯 Пріоритет: виділений текст на сторінці</span>
+              <button id="btnClearPageSelectionFocus" type="button" class="sp-selection-ignore-btn" title="Ігнорувати виділення та відповідати по всій сторінці">
+                ✕ Уся сторінка
+              </button>
+            </div>
+            <div id="pageAssistantSelectionPreview" class="sp-selection-preview-text"></div>
+          </div>
+
+          <!-- Quick Starter Prompts -->
+          <div class="sp-presets-group flex-wrap" aria-label="Швидкі запити по сторінці">
+            <button type="button" data-page-preset="Поясни головну суть та зроби короткий зміст (summary)." class="page-preset-btn ext-chip-btn">📝 Короткий зміст</button>
+            <button type="button" data-page-preset="Випиши ключові тези, факти та висновки." class="page-preset-btn ext-chip-btn">🔑 Головні тези</button>
+            <button type="button" data-page-preset="Поясни граматику, лексику та переклад цього фрагмента або тексту." class="page-preset-btn ext-chip-btn">🎓 Розбір і переклад</button>
+            <button type="button" data-page-preset="Знайди запитання чи завдання та дай правильні відповіді з коротким поясненням." class="page-preset-btn ext-chip-btn">❓ Відповіді на питання</button>
+          </div>
+
+          <!-- Question / Prompt Input -->
+          <div class="ai-editor-boxes-card">
+            <div class="sp-box-section">
+              <div class="sp-box-header">
+                <label for="pageAssistantInput" class="sp-box-title">Запитання або промпт</label>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] text-slate-400">Ctrl+Enter</span>
+                  <button id="btnClearPagePrompt" type="button" class="sp-clear-btn" title="Очистити запитання">✕</button>
+                </div>
+              </div>
+              <textarea id="pageAssistantInput" rows="2" spellcheck="false" placeholder="Запитайте будь-що про виділений фрагмент або поточну сторінку..." class="proofread-textarea"></textarea>
+            </div>
+          </div>
+
+          <!-- Primary Ask Button -->
+          <button id="btnAskPageAssistant" type="button" class="ext-btn-primary">
+            🤖 Запитати по сторінці
+          </button>
+
+          <!-- Assistant Answer Card -->
+          <div id="pageAssistantResultWrap" class="ai-editor-boxes-card hidden">
+            <div class="sp-box-section">
+              <div class="sp-box-header">
+                <div class="flex items-center gap-1.5">
+                  <span class="sp-box-title text-emerald-300">Відповідь Page AI</span>
+                  <span id="pageAssistantScopeBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/70">Сторінка</span>
+                </div>
+                <button id="btnCopyPageAnswer" type="button" title="Скопіювати відповідь у буфер обміну" class="ext-copy-btn">
+                  📋 Копіювати
+                </button>
+              </div>
+              <div id="pageAssistantAnswerBox" class="proofread-result-text sp-assistant-answer"></div>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   </div>
