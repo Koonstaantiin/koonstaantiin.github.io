@@ -15,15 +15,18 @@
           <span class="sp-brand-icon">✨</span>
           <div>
             <div class="sp-brand-title">ШІ-редактор</div>
-            <div class="sp-brand-sub">1 запит → 4 стилі + правила</div>
+            <div id="spModeSubtitle" class="sp-brand-sub">⚡ Швидка перевірка + правила</div>
           </div>
         </div>
         <div class="sp-header-actions">
+          <button id="btnToggleQuickMode" type="button" class="ext-btn-quick ext-btn-quick-active" aria-pressed="true" title="Перемикач режиму: ⚡ Швидкий (лише граматика оригіналу + правила, у 3 рази швидше) або 🎨 4 Стилі (генерація Стандарт / Short / Formal / Corp)">
+            ⚡ Швидкий
+          </button>
           <button id="btnToggleCamC1C2" type="button" class="ext-btn-cam ext-btn-cam-active" aria-pressed="true" title="Суворий режим Cambridge C1/C2 (CAE/CPE): перевіряє всі 12 розділів поглибленої граматики (Unreal Past, Modal Idioms, Inversion, Subjunctive, Conditionals, Collocations)">
             🎓 C1/C2: ON
           </button>
           <button id="btnGrabPageSelection" type="button" class="ext-btn-secondary" title="Взяти виділений мишкою текст з активної вкладки">
-            📥 Зі сторінки
+            📥
           </button>
         </div>
       </div>
@@ -41,8 +44,8 @@
           <div class="flex items-center justify-between gap-2">
             <label for="extModelSelect" class="text-[11px] text-slate-400 font-medium">Модель:</label>
             <select id="extModelSelect" class="ext-input">
-              <option value="gemini-3.8-flash" selected>gemini-3.8-flash (Швидка)</option>
-              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Легка)</option>
+              <option value="gemini-3.5-flash-lite" selected>gemini-3.5-flash-lite (Миттєва)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (Розумна)</option>
               <option value="gemini-4-argon">gemini-4-argon (Глибока)</option>
               <option value="gemini-4-carbon">gemini-4-carbon (Макс)</option>
             </select>
@@ -55,8 +58,8 @@
     <main class="sp-main">
       <!-- Editor Card -->
       <section class="ai-editor-shell">
-        <!-- 4-Style Segmented Switcher (Default / Short / Formal / Corp) -->
-        <div class="style-variant-bar" role="tablist" aria-label="Стиль результату">
+        <!-- 4-Style Segmented Switcher (Default / Short / Formal / Corp) — shown when Styles mode is enabled -->
+        <div id="styleVariantBar" class="style-variant-bar hidden" role="tablist" aria-label="Стиль результату">
           <button type="button" data-style-variant="default" class="style-variant-btn style-variant-btn-active" title="Стандартне виправлення зі збереженням тону">
             🔍 Стандарт
           </button>
@@ -133,7 +136,9 @@
       <section class="ai-editor-shell sp-rules-section">
         <div class="sp-rules-header">
           <span class="text-[11px] font-extrabold text-amber-300 uppercase">📚 Застосовані правила</span>
-          <span class="text-[10px] text-slate-400">Наведіть для підсвітки</span>
+          <button id="btnExplainRules" type="button" class="ext-btn-explain" title="Згенерувати детальне пояснення граматичних правил для поточного виправлення">
+            📚 Поясни правила
+          </button>
         </div>
         <div id="proofreadRulesContainer" class="space-y-2"></div>
       </section>

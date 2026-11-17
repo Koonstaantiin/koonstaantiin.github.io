@@ -88,6 +88,62 @@ body {
   box-shadow: 0 0 8px rgba(245, 158, 11, 0.18);
 }
 
+.ext-btn-quick {
+  background-color: #1e293b;
+  color: #cbd5e1;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+
+.ext-btn-quick:hover {
+  border-color: #64748b;
+  color: #ffffff;
+}
+
+.ext-btn-quick-active {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22), rgba(5, 150, 105, 0.12)) !important;
+  color: #6ee7b7 !important;
+  border-color: rgba(52, 211, 153, 0.65) !important;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.18);
+}
+
+.ext-btn-styles-active {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.22), rgba(126, 34, 206, 0.14)) !important;
+  color: #d8b4fe !important;
+  border-color: rgba(192, 132, 252, 0.65) !important;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.18);
+}
+
+.ext-btn-explain {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(217, 119, 6, 0.1));
+  color: #fcd34d;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 0.45rem;
+  padding: 0.22rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.14s ease;
+}
+
+.ext-btn-explain:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.28), rgba(217, 119, 6, 0.18));
+  color: #fef08a;
+  border-color: #fbbf24;
+}
+
+.ext-btn-explain:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .sp-brand {
   display: flex;
   align-items: center;

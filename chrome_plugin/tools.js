@@ -84,7 +84,10 @@ let currentProofreadState = {
   appliedRules: [],
   displayMode: 'wavy', // 'wavy' | 'inline'
   strictC1C2: true, // Cambridge CAE/CPE 12-pillar strict mode
+  quickMode: true, // true = Instant Quick Mode (only corrected_text), false = 4 Styles + rules
+  error: null,
   isLoading: false,
+  isExplainingRules: false,
   usedOfflineFallback: false
 };
 
@@ -145,20 +148,20 @@ function isDeprecatedGeminiModel(modelId) {
 
 function getProofreadModelCandidates() {
   const currentModels = [
-    'gemini-3.8-flash',
     'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.8-flash',
     'gemini-4-argon',
-    'gemini-4-carbon',
-    'gemini-3.1-flash-lite'
+    'gemini-4-carbon'
   ];
   const extModelEl = document.getElementById('extModelSelect');
-  const rawPreferred = (extModelEl && extModelEl.value) || 'gemini-3.8-flash';
+  const rawPreferred = (extModelEl && extModelEl.value) || 'gemini-3.5-flash-lite';
   const preferredModel = isDeprecatedGeminiModel(rawPreferred)
-    ? 'gemini-3.8-flash'
+    ? 'gemini-3.5-flash-lite'
     : rawPreferred;
 
   if (extModelEl && isDeprecatedGeminiModel(extModelEl.value)) {
-    extModelEl.value = 'gemini-3.8-flash';
+    extModelEl.value = 'gemini-3.5-flash-lite';
   }
 
   return [...new Set([preferredModel, ...currentModels])].filter(
@@ -221,7 +224,7 @@ function extractGeminiJsonObject(data) {
 // SINGLE-QUERY MULTI-STYLE PROMPT & SIMULATION FALLBACK
 // =========================================================================
 
-function buildProofreadSystemInstruction(strictC1C2 = true) {
+function buildProofreadSystemInstruction(strictC1C2 = true, quickMode = true) {
   const cambridgeTaxonomyBlock = strictC1C2
     ? `
 2. СУВОРИЙ АУДИТ ЗА 12 РОЗДІЛАМИ CAMBRIDGE C1/C2 (CAE / CPE Use of English):
@@ -263,6 +266,19 @@ function buildProofreadSystemInstruction(strictC1C2 = true) {
     : `
 2. РЕЖИМ СТАНДАРТНОЇ КОРЕКТУРИ (Everyday Proofreading):
    Виправляй реальні граматичні, орфографічні, пунктуаційні та лексичні помилки, але зберігай природні розмовні конструкції, якщо вони прийнятні в живому спілкуванні.`;
+
+  if (quickMode) {
+    return `Ти — професійний лінгвіст-редактор${strictC1C2 ? ', екзаменатор рівня Cambridge C1/C2 (CAE/CPE)' : ''} та коректор (рівень Grammarly Pro / DeepL Write).
+Твоє завдання — МИТТЄВО виправити всі граматичні, орфографічні, пунктуаційні, лексичні та семантико-граматичні помилки в оригінальному тексті зі збереженням початкового тону, мови та структури автора.${cambridgeTaxonomyBlock}
+
+Поверни ВИКЛЮЧНО мінімальний JSON-об'єкт (без жодних пояснень правил — лише виправлений текст):
+{
+  "detected_language": "uk" | "en" | "ru" | "other",
+  "corrected_text": "виправлений текст мовою оригіналу"
+}
+
+ВАЖЛИВО: Не перекладай текст іншою мовою і не додавай жодних префіксів чи коментарів.`;
+  }
 
   return `Ти — професійний лінгвіст-редактор${strictC1C2 ? ', екзаменатор рівня Cambridge C1/C2 (CAE/CPE)' : ''} та коректор (рівень Grammarly Pro / LanguageTool для української, англійської та інших мов).
 Твоє завдання — за ОДИН запит:
@@ -630,9 +646,89 @@ const PROOFREAD_RESPONSE_JSON_SCHEMA = {
   required: ['detected_language', 'applied_rules', 'summary', 'variants']
 };
 
+// Ultra-Lean Instant Quick Mode Schema (only corrected_text — ~90% fewer output tokens, sub-second response)
+const QUICK_PROOFREAD_RESPONSE_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    detected_language: { type: 'string' },
+    corrected_text: { type: 'string' }
+  },
+  required: ['detected_language', 'corrected_text']
+};
+
+// On-Demand Rules Explanation Schema (triggered by "📚 Поясни правила" button)
+const EXPLAIN_RULES_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    applied_rules: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          category: { type: 'string' },
+          original_fragment: { type: 'string' },
+          fixed_fragment: { type: 'string' },
+          rule_title: { type: 'string' },
+          explanation: { type: 'string' }
+        },
+        required: ['category', 'original_fragment', 'fixed_fragment', 'rule_title', 'explanation']
+      }
+    }
+  },
+  required: ['summary', 'applied_rules']
+};
+
+function buildExplainRulesSystemInstruction(strictC1C2 = true) {
+  return `Ти — професійний лінгвіст-викладач${strictC1C2 ? ' та екзаменатор Cambridge C1/C2 (CAE/CPE)' : ''}.
+Порівняй текст "ОРИГІНАЛ" та "ВИПРАВЛЕНИЙ ТЕКСТ" і поясни українською мовою кожне граматичне, пунктуаційне, орфографічне або стилістичне правило, яке було застосовано.
+Поверни ВИКЛЮЧНО валідний JSON:
+{
+  "summary": "коротке резюме виправлень українською мовою (1 речення)",
+  "applied_rules": [
+    {
+      "category": "grammar" | "punctuation" | "spelling" | "word_choice" | "style",
+      "original_fragment": "точний фрагмент з оригіналу до виправлення",
+      "fixed_fragment": "точний фрагмент у виправленому тексті (або порожній рядок, якщо видалено)",
+      "rule_title": "коротка назва застосованого правила українською мовою",
+      "explanation": "чітке й лаконічне пояснення українською мовою (1 речення), чому зроблено це виправлення"
+    }
+  ]
+}`;
+}
+
+async function fetchWithAttemptTimeout(url, options, timeoutMs, externalSignal = null) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(new Error('Час очікування відповіді від моделі вичерпано (таймаут)')),
+    timeoutMs
+  );
+  const onExternalAbort = () => controller.abort(new Error('Запит скасовано'));
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timeoutId);
+      throw new Error('Запит скасовано');
+    }
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === 'AbortError' || String(err?.message || '').includes('aborted')) {
+      throw new Error('Час очікування відповіді вичерпано — спробуйте ще раз або оберіть ⚡ Швидкий режим');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+  }
+}
+
 async function callGeminiProofreadApi(originalText, signal = null) {
   const apiKey = getProofreadApiKey();
   const strictMode = currentProofreadState.strictC1C2 !== false;
+  const isQuick = currentProofreadState.quickMode !== false;
+
   if (!apiKey) {
     await new Promise(r => setTimeout(r, 220));
     const sim = simulateProofreadPipeline(originalText);
@@ -644,61 +740,76 @@ async function callGeminiProofreadApi(originalText, signal = null) {
   }
 
   const modelsToTry = getProofreadModelCandidates();
-  const deadline = Date.now() + 24000;
   const modelErrors = [];
-  const sysInstruction = buildProofreadSystemInstruction(strictMode);
+  const sysInstruction = buildProofreadSystemInstruction(strictMode, isQuick);
+  const activeSchema = isQuick ? QUICK_PROOFREAD_RESPONSE_JSON_SCHEMA : PROOFREAD_RESPONSE_JSON_SCHEMA;
+  const perCallTimeoutMs = isQuick ? 26000 : 42000;
+
   const modeHeader = strictMode
-    ? '[РЕЖИМ: CAMBRIDGE C1/C2 STRICT EXAMINER — перевір речення за всіма 12 розділами CAE/CPE Use of English (Unreal Past, Modal Idioms, Inversion, Subjunctive, Conditionals, Collocations), спочатку заповни applied_rules, а потім variants]'
+    ? '[РЕЖИМ: CAMBRIDGE C1/C2 STRICT EXAMINER — перевір речення за всіма 12 розділами CAE/CPE Use of English (Unreal Past, Modal Idioms, Inversion, Subjunctive, Conditionals, Collocations)]'
     : '[РЕЖИМ: СТАНДАРТНА КОРЕКТУРА]';
-  const userPrompt = `${modeHeader}\nПеревір цей текст, спочатку випиши всі застосовані правила в applied_rules, а потім згенеруй всі 4 стилі (default, short, formal, corp) в одному JSON:\n\n"""\n${originalText}\n"""`;
+
+  const userPrompt = isQuick
+    ? `${modeHeader}\n[INSTANT QUICK MODE — ПОВЕРНИ ТІЛЬКИ detected_language ТА corrected_text БЕЗ ПОЯСНЕНЬ]\nВиправ усі помилки в цьому тексті:\n\n"""\n${originalText}\n"""`
+    : `${modeHeader}\nПеревір цей текст, спочатку випиши всі застосовані правила в applied_rules, а потім згенеруй всі 4 стилі (default, short, formal, corp) в одному JSON:\n\n"""\n${originalText}\n"""`;
 
   for (const modelId of modelsToTry) {
-    const remainingMs = deadline - Date.now();
-    if ((signal && signal.aborted) || remainingMs < 1500) break;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), remainingMs);
-    const onAbort = () => controller.abort();
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    if (signal && signal.aborted) break;
 
     try {
       // 1. Primary path: Gemini Interactions API (v1beta/interactions, Api-Revision: 2026-05-20)
-      // Note: Do not pass deprecated `temperature` parameter on Gemini 3.8 / 4 models
+      // Use store: false + thinking_level: "minimal" for instant sub-second turnaround
       const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
-      let response = await fetch(interactionsUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-          'Api-Revision': '2026-05-20'
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: modelId,
-          system_instruction: sysInstruction,
-          input: userPrompt,
-          response_format: PROOFREAD_RESPONSE_JSON_SCHEMA
-        })
-      });
-
-      // 2. Automatic fallback to v1beta/models/{model}:generateContent if endpoint returns 404/400
-      if (!response.ok && (response.status === 404 || response.status === 400)) {
-        const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        response = await fetch(generateUrl, {
+      let response = await fetchWithAttemptTimeout(
+        interactionsUrl,
+        {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+            'Api-Revision': '2026-05-20'
+          },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: sysInstruction }] },
-            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-            generationConfig: {
-              responseMimeType: 'application/json'
+            model: modelId,
+            store: false,
+            system_instruction: sysInstruction,
+            input: userPrompt,
+            response_format: activeSchema,
+            generation_config: {
+              thinking_config: {
+                thinking_level: 'minimal'
+              }
             }
           })
-        });
+        },
+        perCallTimeoutMs,
+        signal
+      );
+
+      // 2. Automatic fallback to v1beta/models/{model}:generateContent with its own clean timeout
+      if (!response.ok && (response.status === 404 || response.status === 400)) {
+        const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        response = await fetchWithAttemptTimeout(
+          generateUrl,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: sysInstruction }] },
+              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                thinkingConfig: {
+                  thinkingBudget: 0
+                }
+              }
+            })
+          },
+          perCallTimeoutMs,
+          signal
+        );
       }
 
-      clearTimeout(timeoutId);
       if (!response.ok) {
         let apiErrDetail = '';
         try {
@@ -723,14 +834,103 @@ async function callGeminiProofreadApi(originalText, signal = null) {
         usedOfflineFallback: false
       };
     } catch (err) {
-      clearTimeout(timeoutId);
       modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
-    } finally {
-      if (signal) signal.removeEventListener('abort', onAbort);
     }
   }
 
   throw new Error(modelErrors[0] || 'Не вдалося виконати запит до Gemini API');
+}
+
+async function callGeminiExplainRulesApi(originalText, correctedText) {
+  const apiKey = getProofreadApiKey();
+  if (!apiKey) {
+    const sim = simulateProofreadPipeline(originalText);
+    return {
+      summary: sim.summary || '',
+      applied_rules: Array.isArray(sim.applied_rules) ? sim.applied_rules : []
+    };
+  }
+
+  const strictMode = currentProofreadState.strictC1C2 !== false;
+  const sysInstruction = buildExplainRulesSystemInstruction(strictMode);
+  const userPrompt = `ОРИГІНАЛ:\n"""\n${originalText}\n"""\n\nВИПРАВЛЕНИЙ ТЕКСТ:\n"""\n${correctedText}\n"""\n\nПоясни кожне застосоване правило між оригіналом і виправленим текстом у масиві applied_rules.`;
+  const modelsToTry = getProofreadModelCandidates();
+  const modelErrors = [];
+
+  for (const modelId of modelsToTry) {
+    try {
+      const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
+      let response = await fetchWithAttemptTimeout(
+        interactionsUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+            'Api-Revision': '2026-05-20'
+          },
+          body: JSON.stringify({
+            model: modelId,
+            store: false,
+            system_instruction: sysInstruction,
+            input: userPrompt,
+            response_format: EXPLAIN_RULES_JSON_SCHEMA,
+            generation_config: {
+              thinking_config: {
+                thinking_level: 'minimal'
+              }
+            }
+          })
+        },
+        24000
+      );
+
+      if (!response.ok && (response.status === 404 || response.status === 400)) {
+        const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        response = await fetchWithAttemptTimeout(
+          generateUrl,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: sysInstruction }] },
+              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                thinkingConfig: {
+                  thinkingBudget: 0
+                }
+              }
+            })
+          },
+          24000
+        );
+      }
+
+      if (!response.ok) {
+        let apiErrDetail = '';
+        try {
+          const errObj = await response.json();
+          apiErrDetail = errObj?.error?.message || '';
+        } catch (e) {}
+        const msg = `HTTP ${response.status} (${modelId})${apiErrDetail ? ': ' + apiErrDetail : ''}`;
+        modelErrors.push(msg);
+        if (response.status === 404 || response.status === 503) continue;
+        throw new Error(msg);
+      }
+
+      const data = await response.json();
+      const parsed = extractGeminiJsonObject(data);
+      return {
+        summary: parsed.summary || '',
+        applied_rules: Array.isArray(parsed.applied_rules) ? parsed.applied_rules : []
+      };
+    } catch (err) {
+      modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
+    }
+  }
+
+  throw new Error(modelErrors[0] || 'Не вдалося згенерувати пояснення правил');
 }
 
 // =========================================================================
@@ -896,6 +1096,8 @@ function persistProofreadSession() {
     appliedRules: currentProofreadState.appliedRules,
     displayMode: currentProofreadState.displayMode,
     strictC1C2: currentProofreadState.strictC1C2,
+    quickMode: currentProofreadState.quickMode,
+    error: currentProofreadState.error,
     usedOfflineFallback: currentProofreadState.usedOfflineFallback
   };
   try {
@@ -919,6 +1121,10 @@ function restoreProofreadSessionSnapshot(saved) {
   if (typeof saved.strictC1C2 === 'boolean') {
     currentProofreadState.strictC1C2 = saved.strictC1C2;
   }
+  if (typeof saved.quickMode === 'boolean') {
+    currentProofreadState.quickMode = saved.quickMode;
+  }
+  currentProofreadState.error = typeof saved.error === 'string' && saved.error ? saved.error : null;
   currentProofreadState.usedOfflineFallback = Boolean(saved.usedOfflineFallback);
 
   if (inputEl) {
@@ -943,12 +1149,44 @@ function renderProofreadView() {
   const badgeCountEl = document.getElementById('proofreadChangesCountBadge');
   const summaryEl = document.getElementById('proofreadSummaryText');
   const styleNoteEl = document.getElementById('proofreadStyleNote');
+  const styleBarEl = document.getElementById('styleVariantBar');
+  const modeSubtitleEl = document.getElementById('spModeSubtitle');
   const btnModeWavy = document.getElementById('btnDiffModeWavy');
   const btnModeInline = document.getElementById('btnDiffModeInline');
   const btnToggleCam = document.getElementById('btnToggleCamC1C2');
+  const btnToggleQuick = document.getElementById('btnToggleQuickMode');
+  const btnExplainRules = document.getElementById('btnExplainRules');
   const runBtn = document.getElementById('btnRunProofread');
 
   if (!resultBoxEl || !rulesContainerEl) return;
+
+  const isQuick = currentProofreadState.quickMode !== false;
+
+  if (btnExplainRules) {
+    btnExplainRules.disabled = Boolean(currentProofreadState.isLoading || currentProofreadState.isExplainingRules);
+    btnExplainRules.textContent = currentProofreadState.isExplainingRules
+      ? '⏳ Пояснюю...'
+      : '📚 Поясни правила';
+  }
+
+  // Sync Quick Mode vs 4-Styles Mode toggle button & visibility
+  if (btnToggleQuick) {
+    btnToggleQuick.classList.toggle('ext-btn-quick-active', isQuick);
+    btnToggleQuick.classList.toggle('ext-btn-styles-active', !isQuick);
+    btnToggleQuick.setAttribute('aria-pressed', String(isQuick));
+    btnToggleQuick.textContent = isQuick ? '⚡ Швидкий' : '🎨 4 Стилі';
+  }
+  if (styleBarEl) {
+    styleBarEl.classList.toggle('hidden', isQuick);
+  }
+  if (styleNoteEl) {
+    styleNoteEl.classList.toggle('hidden', isQuick || Boolean(currentProofreadState.error));
+  }
+  if (modeSubtitleEl) {
+    modeSubtitleEl.textContent = isQuick
+      ? '⚡ Швидка перевірка + правила'
+      : '🎨 1 запит → 4 стилі + правила';
+  }
 
   // Sync Cambridge C1/C2 strict mode toggle button
   if (btnToggleCam) {
@@ -979,9 +1217,19 @@ function renderProofreadView() {
   if (currentProofreadState.isLoading) {
     if (runBtn) {
       runBtn.disabled = true;
-      runBtn.textContent = '⏳ Генерую 4 стилі (Interactions API)...';
+      runBtn.textContent = isQuick
+        ? '⏳ Швидка перевірка тексту...'
+        : '⏳ Генерую 4 стилі + правила...';
     }
-    resultBoxEl.innerHTML = `<span class="text-slate-400 italic text-xs">ШІ перевіряє текст та готує варіанти Default / Short / Formal / Corp в 1 запит...</span>`;
+    if (badgeCountEl) {
+      badgeCountEl.textContent = '⏳ Перевірка...';
+      badgeCountEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700';
+    }
+    resultBoxEl.innerHTML = `<span class="text-slate-400 italic text-xs">${
+      isQuick
+        ? 'ШІ швидко перевіряє граматику оригіналу та формує пояснення правил...'
+        : 'ШІ перевіряє текст та готує варіанти Default / Short / Formal / Corp в 1 запит...'
+    }</span>`;
     return;
   }
 
@@ -990,23 +1238,46 @@ function renderProofreadView() {
     runBtn.textContent = '🔍 Перевірити та виправити';
   }
 
+  // Handle API Error State explicitly: never show "Без змін ✓" or fill Результат with unverified text
+  if (currentProofreadState.error) {
+    if (badgeCountEl) {
+      badgeCountEl.textContent = '⚠️ Помилка запиту';
+      badgeCountEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-950/90 text-rose-300 border border-rose-700/70';
+    }
+    resultBoxEl.innerHTML = `<span class="text-rose-300 text-xs">❌ Результат не отримано: ${safeEscapeHtml(currentProofreadState.error)}</span>`;
+    if (summaryEl) {
+      summaryEl.classList.add('hidden');
+    }
+    rulesContainerEl.innerHTML = `
+      <div class="bg-rose-950/90 border border-rose-700/70 rounded-xl p-3 text-center text-[11px] text-rose-300">
+        ⚠️ Запит до Gemini API завершився помилкою. Натисніть «Перевірити та виправити» (або Ctrl+Enter), щоб повторити спробу.
+      </div>
+    `;
+    return;
+  }
+
   const orig = currentProofreadState.originalText || '';
-  const activeVar = getActiveVariantObject();
+  const activeStyleKey = isQuick ? 'default' : currentProofreadState.activeStyle;
+  const activeVar = currentProofreadState.variants?.[activeStyleKey]
+    || currentProofreadState.variants?.default
+    || { text: orig, note: '' };
   const corr = activeVar.text || orig;
 
   const { html, changeCount } = buildDiffHtml(orig, corr, currentProofreadState.displayMode);
   resultBoxEl.innerHTML = html || '<span class="text-slate-500 italic">Немає тексту для відображення</span>';
 
-  const styleMeta = PROOFREAD_STYLE_META[currentProofreadState.activeStyle] || PROOFREAD_STYLE_META.default;
-  if (styleNoteEl) {
+  const styleMeta = PROOFREAD_STYLE_META[activeStyleKey] || PROOFREAD_STYLE_META.default;
+  if (styleNoteEl && !isQuick) {
     styleNoteEl.innerHTML = `<b class="text-sky-300">${safeEscapeHtml(styleMeta.badge)}:</b> ${safeEscapeHtml(activeVar.note || styleMeta.defaultNote)}`;
   }
 
   if (badgeCountEl) {
-    const countToShow = currentProofreadState.activeStyle === 'default'
+    const countToShow = activeStyleKey === 'default'
       ? (currentProofreadState.appliedRules.length || changeCount)
       : changeCount;
-    badgeCountEl.textContent = countToShow > 0 ? `${countToShow} змін (${styleMeta.label})` : 'Без змін ✓';
+    badgeCountEl.textContent = countToShow > 0
+      ? (isQuick ? `${countToShow} виправлень` : `${countToShow} змін (${styleMeta.label})`)
+      : 'Без змін ✓';
     badgeCountEl.className = countToShow > 0
       ? 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 border border-sky-700/70'
       : 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/70';
@@ -1022,12 +1293,29 @@ function renderProofreadView() {
   }
 
   const rules = currentProofreadState.appliedRules || [];
-  if (rules.length === 0) {
+  if (currentProofreadState.isExplainingRules) {
     rulesContainerEl.innerHTML = `
-      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-emerald-300">
-        ✨ Текст написаний грамотно! Жодних граматичних чи пунктуаційних виправлень не знадобилося.
+      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-amber-300 italic">
+        ⏳ Формую детальні пояснення граматичних правил для виправлень...
       </div>
     `;
+    return;
+  }
+
+  if (rules.length === 0) {
+    if (changeCount > 0) {
+      rulesContainerEl.innerHTML = `
+        <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-slate-300">
+          ⚡ Виправлення виконано миттєво без генерації описів правил. Натисніть <b class="text-amber-300">«📚 Поясни правила»</b> вище, щоб розібрати кожну правку.
+        </div>
+      `;
+    } else {
+      rulesContainerEl.innerHTML = `
+        <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-emerald-300">
+          ✨ Текст написаний грамотно! Жодних граматичних чи пунктуаційних виправлень не знадобилося.
+        </div>
+      `;
+    }
     return;
   }
 
@@ -1091,11 +1379,13 @@ async function runProofreadTool(customText = null) {
   }
 
   currentProofreadState.originalText = textToFix;
+  currentProofreadState.error = null;
   currentProofreadState.isLoading = true;
   renderProofreadView();
 
   try {
     const res = await callGeminiProofreadApi(textToFix);
+    currentProofreadState.error = null;
     currentProofreadState.detectedLanguage = res.detected_language || 'uk';
     currentProofreadState.summary = res.summary || '';
     currentProofreadState.variants = res.variants;
@@ -1111,8 +1401,14 @@ async function runProofreadTool(customText = null) {
     }
   } catch (err) {
     const errMsg = err?.message || 'Помилка запиту до Gemini API';
-    currentProofreadState.summary = `❌ Помилка API: ${errMsg}`;
-    currentProofreadState.variants = normalizeVariantsObject({ corrected_text: textToFix }, textToFix);
+    currentProofreadState.error = errMsg;
+    currentProofreadState.summary = '';
+    currentProofreadState.variants = {
+      default: { text: '', note: '' },
+      short: { text: '', note: '' },
+      formal: { text: '', note: '' },
+      corp: { text: '', note: '' }
+    };
     currentProofreadState.appliedRules = [];
     currentProofreadState.usedOfflineFallback = false;
     notifyProofreadToast(`❌ ${errMsg}`);
@@ -1123,12 +1419,43 @@ async function runProofreadTool(customText = null) {
   }
 }
 
+async function explainProofreadRulesOnly() {
+  const orig = (currentProofreadState.originalText || '').trim();
+  const activeVar = getActiveVariantObject();
+  const corr = (activeVar.text || '').trim();
+
+  if (!orig || !corr) {
+    notifyProofreadToast('Спочатку перевірте текст кнопкою «Перевірити та виправити»');
+    return;
+  }
+  if (orig === corr) {
+    notifyProofreadToast('✨ Між оригіналом та результатом немає розбіжностей');
+    return;
+  }
+
+  currentProofreadState.isExplainingRules = true;
+  renderProofreadView();
+
+  try {
+    const res = await callGeminiExplainRulesApi(orig, corr);
+    currentProofreadState.summary = res.summary || '';
+    currentProofreadState.appliedRules = res.applied_rules || [];
+    persistProofreadSession();
+  } catch (err) {
+    notifyProofreadToast(`❌ ${err?.message || 'Помилка генерації правил'}`);
+  } finally {
+    currentProofreadState.isExplainingRules = false;
+    renderProofreadView();
+  }
+}
+
 function applyInitialProofreadData(presetText) {
   const inputEl = document.getElementById('proofreadOriginalInput');
   if (!inputEl) return;
   inputEl.value = presetText;
   const initialResult = simulateProofreadPipeline(presetText);
   currentProofreadState.originalText = presetText;
+  currentProofreadState.error = null;
   currentProofreadState.detectedLanguage = initialResult.detected_language;
   currentProofreadState.summary = initialResult.summary;
   currentProofreadState.variants = normalizeVariantsObject(initialResult, presetText);
@@ -1158,6 +1485,10 @@ function initParentToolsUi() {
     runProofreadTool();
   });
 
+  document.getElementById('btnExplainRules')?.addEventListener('click', () => {
+    explainProofreadRulesOnly();
+  });
+
   document.getElementById('btnClearOriginal')?.addEventListener('click', () => {
     inputEl.value = '';
     persistProofreadSession();
@@ -1167,6 +1498,35 @@ function initParentToolsUi() {
   inputEl.addEventListener('input', () => {
     persistProofreadSession();
   });
+
+  const quickToggleBtn = document.getElementById('btnToggleQuickMode');
+  if (quickToggleBtn) {
+    try {
+      const savedQuick = localStorage.getItem('chomuchka_ext_quick_mode');
+      if (savedQuick !== null) {
+        currentProofreadState.quickMode = savedQuick === 'true';
+      }
+    } catch (e) {}
+    renderProofreadView();
+
+    quickToggleBtn.addEventListener('click', () => {
+      currentProofreadState.quickMode = !currentProofreadState.quickMode;
+      const isQuick = currentProofreadState.quickMode;
+      if (isQuick) {
+        currentProofreadState.activeStyle = 'default';
+      }
+      try {
+        localStorage.setItem('chomuchka_ext_quick_mode', String(isQuick));
+      } catch (e) {}
+      persistProofreadSession();
+      renderProofreadView();
+      notifyProofreadToast(
+        isQuick
+          ? '⚡ Увімкнено Швидкий режим (лише виправлення оригіналу + правила)'
+          : '🎨 Увімкнено режим 4 стилів (Стандарт / Short / Formal / Corp)'
+      );
+    });
+  }
 
   const camToggleBtn = document.getElementById('btnToggleCamC1C2');
   if (camToggleBtn) {
@@ -1203,12 +1563,12 @@ function initParentToolsUi() {
       if (savedModel && !isDeprecatedGeminiModel(savedModel)) {
         extModelSelect.value = savedModel;
       } else {
-        extModelSelect.value = 'gemini-3.8-flash';
-        localStorage.setItem('chomuchka_ext_model', 'gemini-3.8-flash');
+        extModelSelect.value = 'gemini-3.5-flash-lite';
+        localStorage.setItem('chomuchka_ext_model', 'gemini-3.5-flash-lite');
       }
     } catch (e) {}
     extModelSelect.addEventListener('change', () => {
-      const m = isDeprecatedGeminiModel(extModelSelect.value) ? 'gemini-3.8-flash' : extModelSelect.value;
+      const m = isDeprecatedGeminiModel(extModelSelect.value) ? 'gemini-3.5-flash-lite' : extModelSelect.value;
       extModelSelect.value = m;
       try {
         localStorage.setItem('chomuchka_ext_model', m);
@@ -1247,13 +1607,20 @@ function initParentToolsUi() {
   });
 
   document.getElementById('btnCopyProofread')?.addEventListener('click', async () => {
+    if (currentProofreadState.error) {
+      notifyProofreadToast('⚠️ Немає перевіреного результату через помилку запиту');
+      return;
+    }
     const activeVar = getActiveVariantObject();
-    const textToCopy = activeVar.text || inputEl.value.trim();
+    const textToCopy = activeVar.text || '';
     if (!textToCopy) return;
-    const styleLabel = PROOFREAD_STYLE_META[currentProofreadState.activeStyle]?.label || '';
+    const isQuick = currentProofreadState.quickMode !== false;
+    const styleLabel = isQuick
+      ? 'Виправлений текст'
+      : (PROOFREAD_STYLE_META[currentProofreadState.activeStyle]?.label || '');
     try {
       await navigator.clipboard.writeText(textToCopy);
-      notifyProofreadToast(`📋 Скопійовано варіант «${styleLabel}» у буфер обміну!`);
+      notifyProofreadToast(`📋 Скопійовано «${styleLabel}» у буфер обміну!`);
     } catch (e) {
       notifyProofreadToast('Не вдалося скопіювати автоматично — виділіть текст у блоці «Результат»');
     }
