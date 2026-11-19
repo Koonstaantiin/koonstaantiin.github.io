@@ -75,6 +75,7 @@ let currentProofreadState = {
   detectedLanguage: 'uk',
   summary: '',
   activeStyle: 'default', // 'default' | 'short' | 'formal' | 'corp'
+  activeAnalysisTab: 'rules', // 'rules' | 'grammar' | 'page'
   variants: {
     default: { text: '', note: '' },
     short: { text: '', note: '' },
@@ -82,6 +83,23 @@ let currentProofreadState = {
     corp: { text: '', note: '' }
   },
   appliedRules: [],
+  grammarExplanation: {
+    sentence_type: '',
+    syntax_formula: '',
+    tense_and_mood: '',
+    items: []
+  },
+  pageAssistant: {
+    prompt: '',
+    answer: '',
+    answeredScope: 'page', // 'selection' | 'page'
+    selectedText: '',
+    ignoreSelection: false,
+    pageTitle: '',
+    pageUrl: '',
+    charCount: 0,
+    isLoading: false
+  },
   displayMode: 'wavy', // 'wavy' | 'inline'
   strictC1C2: true, // Cambridge CAE/CPE 12-pillar strict mode
   quickMode: true, // true = Instant Quick Mode (only corrected_text), false = 4 Styles + rules
@@ -269,7 +287,7 @@ function buildProofreadSystemInstruction(strictC1C2 = true, quickMode = true) {
 
   if (quickMode) {
     return `Ти — професійний лінгвіст-редактор${strictC1C2 ? ', екзаменатор рівня Cambridge C1/C2 (CAE/CPE)' : ''} та коректор (рівень Grammarly Pro / DeepL Write).
-Твоє завдання — МИТТЄВО виправити всі граматичні, орфографічні, пунктуаційні, лексичні та семантико-граматичні помилки в оригінальному тексті зі збереженням початкового тону, мови та структури автора.${cambridgeTaxonomyBlock}
+Твоє завдання — МИТТЄВО виправити всі граматичні, орфографічні, пунктуаційні, лексичні та семантико-граматичні помилки в оригінальному тексті у базовому стилі "Стандарт" (зі збереженням початкового тону, мови та структури автора).${cambridgeTaxonomyBlock}
 
 Поверни ВИКЛЮЧНО мінімальний JSON-об'єкт (без жодних пояснень правил — лише виправлений текст):
 {
@@ -283,26 +301,15 @@ function buildProofreadSystemInstruction(strictC1C2 = true, quickMode = true) {
   return `Ти — професійний лінгвіст-редактор${strictC1C2 ? ', екзаменатор рівня Cambridge C1/C2 (CAE/CPE)' : ''} та коректор (рівень Grammarly Pro / LanguageTool для української, англійської та інших мов).
 Твоє завдання — за ОДИН запит:
 1. Виправити всі граматичні, орфографічні, пунктуаційні, лексичні та семантико-граматичні помилки в оригінальному тексті.${cambridgeTaxonomyBlock}
-3. СПОЧАТКУ проведи граматичний аудит і заповни масив "applied_rules" для кожної знайденої помилки між оригіналом і виправленим варіантом.
-4. На основі цих правил згенеруй 4 стилістичні варіанти виправленого тексту (тією самою мовою, якою написано оригінал):
+3. Згенерувати базове виправлення ("default" = Стандарт) та 3 додаткові стилістичні варіанти ("short", "formal", "corp") тією самою мовою, якою написано оригінал:
    - "default": стандартне виправлення всіх знайдених помилок зі збереженням початкового тону та структури автора.
    - "short": лаконічний, стислий варіант (без зайвих слів і води, максимум суті).
    - "formal": офіційно-діловий, ввічливий та виважений тон.
    - "corp": сучасний корпоративний стиль для робочих месенджерів (Slack, Teams, Jira) або ділових листів.
 
-Поверни ВИКЛЮЧНО валідний JSON-об'єкт (де "applied_rules" заповнюється ПЕРЕД "variants"):
+Поверни ВИКЛЮЧНО валідний JSON-об'єкт:
 {
   "detected_language": "uk" | "en" | "ru" | "other",
-  "applied_rules": [
-    {
-      "category": "grammar" | "punctuation" | "spelling" | "word_choice" | "style",
-      "original_fragment": "точний фрагмент з оригіналу до виправлення",
-      "fixed_fragment": "точний фрагмент у виправленому тексті (або порожній рядок, якщо слово видалено)",
-      "rule_title": "коротка назва застосованого правила українською мовою",
-      "explanation": "чітке й зрозуміле пояснення українською мовою (1–2 речення), чому зроблено це виправлення"
-    }
-  ],
-  "summary": "коротке резюме виправлень українською мовою (1 речення)",
   "variants": {
     "default": {
       "text": "виправлений текст у стандартному стилі автора",
@@ -324,9 +331,8 @@ function buildProofreadSystemInstruction(strictC1C2 = true, quickMode = true) {
 }
 
 ВАЖЛИВІ ПРАВИЛА:
-1. Не змінюй мову самого тексту: якщо оригінал англійською — усі 4 тексти в "variants" мають бути англійською; якщо українською — українською. Усі пояснення (summary, note, rule_title, explanation) ЗАВЖДИ пиши українською мовою.
-2. Кожна помилка між оригіналом і variants.default.text повинна мати запис у масиві applied_rules.
-3. КАТЕГОРИЧНО ЗАБОРОНЕНО дублювати привітання чи звертання (наприклад, ніколи не пиши "Hi team — Hi team," або "Please note: Hi team,"). Якщо в оригіналі вже є привітання ("Hi team,"), органічно заміни або інтегруй його відповідно до стилю.`;
+1. Не змінюй мову самого тексту: якщо оригінал англійською — усі 4 тексти в "variants" мають бути англійською; якщо українською — українською. Усі нотатки (note) ЗАВЖДИ пиши українською мовою.
+2. КАТЕГОРИЧНО ЗАБОРОНЕНО дублювати привітання чи звертання (наприклад, ніколи не пиши "Hi team — Hi team," або "Please note: Hi team,"). Якщо в оригіналі вже є привітання ("Hi team,"), органічно заміни або інтегруй його відповідно до стилю.`;
 }
 
 function simulateProofreadPipeline(rawText) {
@@ -384,7 +390,38 @@ function simulateProofreadPipeline(rawText) {
           rule_title: 'Коми та сполучник «або» замість скісних рисок при переліку',
           explanation: 'У зв’язному питальному реченні однорідні члени розділяються комами, а перед останнім варіантом ставиться розділовий сполучник «або» чи «чи».'
         }
-      ]
+      ],
+      grammar_explanation: {
+        sentence_type: 'Складнопідрядне питальне речення зі з’ясувальною підрядною частиною, ускладнене звертанням («Олено»), вставною сполукою («будь ласка») та однорідними непрямими додатками.',
+        syntax_formula: '[Привітання + Звертання (Кл. в.)] + [Головна частина: Наказовий спосіб V + Вставна сполука] + [Підрядна з’ясувальна: сполучна частка «чи» + Безособовий предикатив + Д. в. + Інфінітив + Зн. в. + Однорідні означення в Р. в.]',
+        tense_and_mood: 'Головна частина — наказовий спосіб дієслова доконаного виду 2-ї особи множини («Підкажіть»); підрядна частина — безособово-предикативна конструкція модальності («потрібно брати») у теперішньому часі.',
+        items: [
+          {
+            fragment: 'Привіт, Олено!',
+            grammar_role: 'Вокативне речення / Звертання (Кличний відмінок)',
+            rule_title: 'Кличний відмінок іменників І відміни твердих груп (-о)',
+            explanation: 'Іменники І відміни твердої групи (Олена) у кличному відмінку однини мають закінчення -о («Олено») і відокремлюються комою від вигукового слова привітання.'
+          },
+          {
+            fragment: 'Підкажіть, будь ласка,',
+            grammar_role: 'Головна частина ( присудок у наказовому способі + вставна конструкція)',
+            rule_title: 'Односкладне означено-особове речення з ввічливим імперативом',
+            explanation: 'Дієслово «підкажіть» виступає головним членом означено-особового речення (форма 2-ї особи множини для ввічливого звертання), ускладненого етикетною вставною сполукою «будь ласка».'
+          },
+          {
+            fragment: 'чи потрібно дитині брати два зошити',
+            grammar_role: 'Підрядна з’ясувальна частина (Subordinate Object Clause)',
+            rule_title: 'Безособова предикативна конструкція «потрібно + інфінітив» + давальний суб’єкта',
+            explanation: 'Підрядна частина приєднується питальною часткою-сполучником «чи». Граматичний центр — предикативне слово «потрібно» в поєднанні з інфінітивом «брати», при якому логічний суб’єкт стоїть у давальному відмінку («дитині»), а прямий додаток — у знахідному («два зошити»).'
+          },
+          {
+            fragment: 'на завтрашній урок малювання, ліплення або аплікації',
+            grammar_role: 'Обставина мети/часу + Однорідні неузгоджені означення',
+            rule_title: 'Керування прийменника «на» + Зн. в. та ряд однорідних іменників у Р. в.',
+            explanation: 'Прийменниково-іменникова група «на завтрашній урок» керує низкою однорідних іменників у родовому відмінку («малювання, ліплення або аплікації»), поєднаних безсполучниково та розділовим сполучником «або».'
+          }
+        ]
+      }
     };
   }
 
@@ -439,7 +476,38 @@ function simulateProofreadPipeline(rawText) {
           rule_title: 'Перехідне дієслово "discuss" (без "about") та прислівник часу "tomorrow" (без "on")',
           explanation: 'Дієслово "discuss" в англійській мові є прямоперехідним і не потребує прийменника "about", а перед словами "tomorrow", "today", "yesterday" прийменник "on" не вживається.'
         }
-      ]
+      ],
+      grammar_explanation: {
+        sentence_type: 'Compound Sentence (складносурядне речення з двох незалежних частин, з’єднаних сурядним сполучником "and").',
+        syntax_formula: '[Clause 1: Compound Subject (Alex and I) + Present Perfect (have prepared) + Direct Object + Prep. Phrase (for the kids)] + [, and] + [Clause 2: Subject (we) + Modal Expression (would like) + Infinitive Phrase (to discuss them) + Time Adverbial (tomorrow morning)]',
+        tense_and_mood: 'Clause 1: Present Perfect Active ("have prepared") — підкреслює наявний результат завершеної дії на теперішній момент. Clause 2: Modal Polite Desire ("would like to discuss") — ввічливе вираження наміру та побажання щодо майбутньої дії.',
+        items: [
+          {
+            fragment: 'Alex and I have prepared',
+            grammar_role: 'Compound Subject + Present Perfect Active Predicate',
+            rule_title: 'Узгодження складеного підмета (N + and + Subject Pronoun "I") з Present Perfect',
+            explanation: 'Складений підмет "Alex and I" завжди граматично дорівнює множині ("we"), тому допоміжне дієслово у Present Perfect має форму "have" + Past Participle (V3 "prepared"). Займенник першої особи ставиться на друге місце за правилом ввічливості.'
+          },
+          {
+            fragment: 'three new learning games for the kids',
+            grammar_role: 'Direct Object (Noun Phrase) + Prepositional Beneficiary Phrase',
+            rule_title: 'Порядок слів в іменниковій групі (Determiner + Adjective + Noun Adjunct + Head Noun)',
+            explanation: 'В англійській іменниковій групі числівник ("three") стоїть перед оцінним прикметником ("new") та класифікуючим означенням ("learning"), які описують головний іменник ("games"). Прийменник "for" вказує на адресата/отримувача.'
+          },
+          {
+            fragment: 'and we would like to discuss them',
+            grammar_role: 'Coordinated Independent Clause + Verb Pattern (would like + to-infinitive)',
+            rule_title: 'Конструкція "would like + to V1" та прямоперехідне дієслово "discuss"',
+            explanation: 'Після "would like" завжди вживається повний інфінітив з часткою "to" ("to discuss"). Саме дієслово "discuss" є прямоперехідним (transitive verb) і приєднує прямий додаток ("them") без жодного прийменника.'
+          },
+          {
+            fragment: 'tomorrow morning',
+            grammar_role: 'Adverbial Modifier of Time (Обставина часу)',
+            rule_title: 'Безприйменникове вживання дейктичних обставин часу (tomorrow / today / yesterday)',
+            explanation: 'Складені обставини часу зі словами "tomorrow", "today", "yesterday", "next", "last", "this" приєднуються до дієслова напряму без прийменників "on" або "in".'
+          }
+        ]
+      }
     };
   }
 
@@ -494,7 +562,38 @@ function simulateProofreadPipeline(rawText) {
           rule_title: 'Уникнення невластивих активних дієприкметників на -уч/-юч',
           explanation: 'Активні дієприкметники теперішнього часу з суфіксом -уч-/-юч- («існуючих») не нормативні в українській мові; правильно замінити на прикметник «наявних» або «сучасних».'
         }
-      ]
+      ],
+      grammar_explanation: {
+        sentence_type: 'Просте двоскладне поширене розповідне речення (Simple Extended Declarative Sentence).',
+        syntax_formula: '[Обставина часу: Учора протягом дня] + [Підмет: ми] + [Присудок: вивчали (Past Imperfective)] + [Прямий додаток із означенням: найцікавіші факти] + [Непрямий додаток: про наявних морських тварин]',
+        tense_and_mood: 'Дієслово-присудок «вивчали» стоїть у дійсному способі минулого часу недоконаного виду (множина) — передає тривалий процес дії, що відбувався впродовж певного часового проміжку в минулому.',
+        items: [
+          {
+            fragment: 'Учора протягом дня',
+            grammar_role: 'Обставина часу (прислівник + прийменникова сполука з Р. в.)',
+            rule_title: 'Похідний прийменник часу «протягом / впродовж» + родовий відмінок',
+            explanation: 'Похідні прийменники «протягом» і «впродовж» завжди керують родовим відмінком іменника («протягом дня / року / тижня») і позначають часову тривалість.'
+          },
+          {
+            fragment: 'ми вивчали',
+            grammar_role: 'Граматична основа речення (Підмет + Простий дієслівний присудок)',
+            rule_title: 'Узгодження особового займенника 1-ї особи множини з дієсловом минулого часу',
+            explanation: 'У минулому часі українські дієслова змінюються за родами в однині та мають спільне закінчення -и у множині («ми вивчали»). Недоконаний вид узгоджується з обставиною тривалості «протягом дня».'
+          },
+          {
+            fragment: 'найцікавіші факти',
+            grammar_role: 'Узгоджене означення (найвищий ступінь) + Прямий додаток (Зн. в.)',
+            rule_title: 'Проста форма найвищого ступеня порівняння якісних прикметників',
+            explanation: 'Проста форма найвищого ступеня утворюється додаванням префікса най- до форми вищого ступеня («цікавіші» → «найцікавіші») і узгоджується з іменником «факти» у знахідному відмінку множини.'
+          },
+          {
+            fragment: 'про наявних морських тварин',
+            grammar_role: 'Непрямий додаток із узгодженими означеннями (Прийменник «про» + Зн. в.)',
+            rule_title: 'Керування прийменника «про» та категорія істоти у знахідному відмінку множини',
+            explanation: 'Прийменник «про» вимагає знахідного відмінка; оскільки іменник «тварини» належить до категорії істот, у знахідному відмінку множини його форма збігається з родовим відмінком («наявних морських тварин»).'
+          }
+        ]
+      }
     };
   }
 
@@ -528,7 +627,32 @@ function simulateProofreadPipeline(rawText) {
           rule_title: "Modal Idioms & Preference: «would just as soon / would rather» замість «had better»",
           explanation: "Конструкція «had better» ('d better) виражає нагальну необхідність або попередження про негативні наслідки. Оскільки умова «if it's not essential» вказує на необов'язковість і особисте бажання (preference), правильно вживати «I'd just as soon skip» або «I'd rather skip»."
         }
-      ]
+      ],
+      grammar_explanation: {
+        sentence_type: 'Complex Conditional Sentence (складнопідрядне речення з підрядним умови 1-го типу та модальною ідіомою переваги у головній частині).',
+        syntax_formula: "[Main Clause: Subject (I) + Modal Idiom ('d just as soon / 'd rather) + Bare Infinitive (skip) + Direct Object (the meeting)] + [Conditional Clause: if + Subject (it) + Present Simple Copula ('s not) + Predicative Adjective (essential)]",
+        tense_and_mood: "Головна частина: Modal Preference ('d just as soon + V1) — виражає особисте бажання щодо теперішньої/майбутньої ситуації. Підрядна частина: Present Simple ('is not') після умовного сполучника 'if' для реальної умови.",
+        items: [
+          {
+            fragment: "I'd just as soon skip",
+            grammar_role: 'Subject + Modal Idiom of Preference + Bare Infinitive (V1)',
+            rule_title: "Конструкція «would just as soon / would rather + bare infinitive» (рівень C1/C2)",
+            explanation: "Коли підмет головної дії не змінюється (мовець каже про власну дію), після модальних ідіом переваги «would rather / would sooner / would just as soon» завжди вживається голий інфінітив без частки 'to' ('skip')."
+          },
+          {
+            fragment: 'the meeting',
+            grammar_role: 'Direct Object (Definite Noun Phrase)',
+            rule_title: 'Визначений артикль «the» перед конкретною відомою співрозмовникам подією',
+            explanation: 'Артикль "the" вказує на конкретну зустріч, про яку вже знають обидва учасники діалогу.'
+          },
+          {
+            fragment: "if it's not essential",
+            grammar_role: 'Subordinate Conditional Clause (Real Condition)',
+            rule_title: 'Підрядне речення реальної умови (if + Present Simple) з граничним прикметником',
+            explanation: 'У підрядних реченнях реальної умови після "if" вживається Present Simple ("it is not"), навіть коли мова йде про майбутню зустріч. Прикметник "essential" (критично важливий, обов’язковий) логічно задає необов’язковість присутності.'
+          }
+        ]
+      }
     };
   }
 
@@ -559,7 +683,30 @@ function simulateProofreadPipeline(rawText) {
         note: noKeyNote
       }
     },
-    applied_rules: []
+    applied_rules: [],
+    grammar_explanation: {
+      sentence_type: '🔑 Потрібен ключ Gemini API для повного граматичного аналізу довільних речень.',
+      syntax_formula: 'Введіть ключ AIza... у верхньому блоці «🔑 Gemini API та модель» і натисніть «Зберегти».',
+      tense_and_mood: 'Після підключення ключа натисніть «🔍 Перевірити та виправити», щоб отримати повний синтаксичний і граматичний розбір будь-якого речення.',
+      items: []
+    }
+  };
+}
+
+function normalizeGrammarExplanationObject(rawGrammar) {
+  const g = rawGrammar && typeof rawGrammar === 'object' ? rawGrammar : {};
+  return {
+    sentence_type: typeof g.sentence_type === 'string' ? g.sentence_type.trim() : '',
+    syntax_formula: typeof g.syntax_formula === 'string' ? g.syntax_formula.trim() : '',
+    tense_and_mood: typeof g.tense_and_mood === 'string' ? g.tense_and_mood.trim() : '',
+    items: Array.isArray(g.items)
+      ? g.items.map(it => ({
+          fragment: typeof it?.fragment === 'string' ? it.fragment.trim() : '',
+          grammar_role: typeof it?.grammar_role === 'string' ? it.grammar_role.trim() : 'Граматична конструкція',
+          rule_title: typeof it?.rule_title === 'string' ? it.rule_title.trim() : 'Граматичне правило',
+          explanation: typeof it?.explanation === 'string' ? it.explanation.trim() : ''
+        }))
+      : []
   };
 }
 
@@ -595,27 +742,11 @@ function normalizeVariantsObject(parsed, fallbackText) {
   };
 }
 
-// Diagnosis-First JSON Schema: `applied_rules` is generated BEFORE `variants`
-// so the model performs its C1/C2 grammatical audit before writing the corrected text.
+// Styles Mode Schema (Стандарт + 3 extra styles: Short / Formal / Corp, without heavy rules)
 const PROOFREAD_RESPONSE_JSON_SCHEMA = {
   type: 'object',
   properties: {
     detected_language: { type: 'string' },
-    applied_rules: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          category: { type: 'string' },
-          original_fragment: { type: 'string' },
-          fixed_fragment: { type: 'string' },
-          rule_title: { type: 'string' },
-          explanation: { type: 'string' }
-        },
-        required: ['category', 'original_fragment', 'fixed_fragment', 'rule_title', 'explanation']
-      }
-    },
-    summary: { type: 'string' },
     variants: {
       type: 'object',
       properties: {
@@ -643,10 +774,10 @@ const PROOFREAD_RESPONSE_JSON_SCHEMA = {
       required: ['default', 'short', 'formal', 'corp']
     }
   },
-  required: ['detected_language', 'applied_rules', 'summary', 'variants']
+  required: ['detected_language', 'variants']
 };
 
-// Ultra-Lean Instant Quick Mode Schema (only corrected_text — ~90% fewer output tokens, sub-second response)
+// Ultra-Lean Instant Standard (Fast) Mode Schema (only corrected_text — ~90% fewer output tokens, sub-second response)
 const QUICK_PROOFREAD_RESPONSE_JSON_SCHEMA = {
   type: 'object',
   properties: {
@@ -656,7 +787,7 @@ const QUICK_PROOFREAD_RESPONSE_JSON_SCHEMA = {
   required: ['detected_language', 'corrected_text']
 };
 
-// On-Demand Rules Explanation Schema (triggered by "📚 Поясни правила" button)
+// On-Demand Rules & Grammar Explanation Schema (triggered by "📚 Поясни правила" / "🧬 Поясни граматику" buttons)
 const EXPLAIN_RULES_JSON_SCHEMA = {
   type: 'object',
   properties: {
@@ -674,27 +805,39 @@ const EXPLAIN_RULES_JSON_SCHEMA = {
         },
         required: ['category', 'original_fragment', 'fixed_fragment', 'rule_title', 'explanation']
       }
+    },
+    grammar_explanation: {
+      type: 'object',
+      properties: {
+        sentence_type: { type: 'string' },
+        syntax_formula: { type: 'string' },
+        tense_and_mood: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              fragment: { type: 'string' },
+              grammar_role: { type: 'string' },
+              rule_title: { type: 'string' },
+              explanation: { type: 'string' }
+            },
+            required: ['fragment', 'grammar_role', 'rule_title', 'explanation']
+          }
+        }
+      },
+      required: ['sentence_type', 'syntax_formula', 'tense_and_mood', 'items']
     }
   },
-  required: ['summary', 'applied_rules']
+  required: ['summary', 'applied_rules', 'grammar_explanation']
 };
 
 function buildExplainRulesSystemInstruction(strictC1C2 = true) {
   return `Ти — професійний лінгвіст-викладач${strictC1C2 ? ' та екзаменатор Cambridge C1/C2 (CAE/CPE)' : ''}.
-Порівняй текст "ОРИГІНАЛ" та "ВИПРАВЛЕНИЙ ТЕКСТ" і поясни українською мовою кожне граматичне, пунктуаційне, орфографічне або стилістичне правило, яке було застосовано.
-Поверни ВИКЛЮЧНО валідний JSON:
-{
-  "summary": "коротке резюме виправлень українською мовою (1 речення)",
-  "applied_rules": [
-    {
-      "category": "grammar" | "punctuation" | "spelling" | "word_choice" | "style",
-      "original_fragment": "точний фрагмент з оригіналу до виправлення",
-      "fixed_fragment": "точний фрагмент у виправленому тексті (або порожній рядок, якщо видалено)",
-      "rule_title": "коротка назва застосованого правила українською мовою",
-      "explanation": "чітке й лаконічне пояснення українською мовою (1 речення), чому зроблено це виправлення"
-    }
-  ]
-}`;
+Порівняй текст "ОРИГІНАЛ" та "ВИПРАВЛЕНИЙ ТЕКСТ":
+1. У масиві "applied_rules" поясни українською мовою кожне граматичне, пунктуаційне, орфографічне або стилістичне правило, яке було застосовано (якщо виправлень не було — поверни порожній масив []).
+2. В об'єкті "grammar_explanation" дай повний граматичний і синтаксичний розбір "ВИПРАВЛЕНОГО ТЕКСТУ" (sentence_type, syntax_formula, tense_and_mood та 3–5 ключових конструкцій у масиві items).
+Поверни ВИКЛЮЧНО валідний JSON за схемою.`;
 }
 
 async function fetchWithAttemptTimeout(url, options, timeoutMs, externalSignal = null) {
@@ -735,6 +878,7 @@ async function callGeminiProofreadApi(originalText, signal = null) {
     return {
       ...sim,
       variants: normalizeVariantsObject(sim, originalText),
+      grammar_explanation: normalizeGrammarExplanationObject(sim.grammar_explanation),
       usedOfflineFallback: true
     };
   }
@@ -750,8 +894,8 @@ async function callGeminiProofreadApi(originalText, signal = null) {
     : '[РЕЖИМ: СТАНДАРТНА КОРЕКТУРА]';
 
   const userPrompt = isQuick
-    ? `${modeHeader}\n[INSTANT QUICK MODE — ПОВЕРНИ ТІЛЬКИ detected_language ТА corrected_text БЕЗ ПОЯСНЕНЬ]\nВиправ усі помилки в цьому тексті:\n\n"""\n${originalText}\n"""`
-    : `${modeHeader}\nПеревір цей текст, спочатку випиши всі застосовані правила в applied_rules, а потім згенеруй всі 4 стилі (default, short, formal, corp) в одному JSON:\n\n"""\n${originalText}\n"""`;
+    ? `${modeHeader}\n[РЕЖИМ "СТАНДАРТ" (FAST) — ПОВЕРНИ ТІЛЬКИ detected_language ТА corrected_text БЕЗ ДОДАТКОВИХ СТИЛІВ І БЕЗ ПОЯСНЕНЬ]\nВиправ усі помилки в цьому тексті:\n\n"""\n${originalText}\n"""`
+    : `${modeHeader}\n[РЕЖИМ "СТАНДАРТ + 3 ДОДАТКОВІ СТИЛІ" — ПОВЕРНИ detected_language ТА variants (default, short, formal, corp) БЕЗ ПОЯСНЕНЬ ПРАВИЛ]\nВиправ цей текст у базовому стилі default та згенеруй ще 3 стилі (short, formal, corp):\n\n"""\n${originalText}\n"""`;
 
   for (const modelId of modelsToTry) {
     if (signal && signal.aborted) break;
@@ -825,12 +969,14 @@ async function callGeminiProofreadApi(originalText, signal = null) {
       const data = await response.json();
       const parsed = extractGeminiJsonObject(data);
       const variants = normalizeVariantsObject(parsed, originalText);
+      const grammarExplanation = normalizeGrammarExplanationObject(parsed.grammar_explanation);
 
       return {
         detected_language: parsed.detected_language || 'uk',
         summary: parsed.summary || '',
         variants,
         applied_rules: Array.isArray(parsed.applied_rules) ? parsed.applied_rules : [],
+        grammar_explanation: grammarExplanation,
         usedOfflineFallback: false
       };
     } catch (err) {
@@ -847,13 +993,14 @@ async function callGeminiExplainRulesApi(originalText, correctedText) {
     const sim = simulateProofreadPipeline(originalText);
     return {
       summary: sim.summary || '',
-      applied_rules: Array.isArray(sim.applied_rules) ? sim.applied_rules : []
+      applied_rules: Array.isArray(sim.applied_rules) ? sim.applied_rules : [],
+      grammar_explanation: normalizeGrammarExplanationObject(sim.grammar_explanation)
     };
   }
 
   const strictMode = currentProofreadState.strictC1C2 !== false;
   const sysInstruction = buildExplainRulesSystemInstruction(strictMode);
-  const userPrompt = `ОРИГІНАЛ:\n"""\n${originalText}\n"""\n\nВИПРАВЛЕНИЙ ТЕКСТ:\n"""\n${correctedText}\n"""\n\nПоясни кожне застосоване правило між оригіналом і виправленим текстом у масиві applied_rules.`;
+  const userPrompt = `ОРИГІНАЛ:\n"""\n${originalText}\n"""\n\nВИПРАВЛЕНИЙ ТЕКСТ:\n"""\n${correctedText}\n"""\n\nПоясни кожне застосоване правило між оригіналом і виправленим текстом у масиві applied_rules та дай граматичний розбір речення у grammar_explanation.`;
   const modelsToTry = getProofreadModelCandidates();
   const modelErrors = [];
 
@@ -923,7 +1070,8 @@ async function callGeminiExplainRulesApi(originalText, correctedText) {
       const parsed = extractGeminiJsonObject(data);
       return {
         summary: parsed.summary || '',
-        applied_rules: Array.isArray(parsed.applied_rules) ? parsed.applied_rules : []
+        applied_rules: Array.isArray(parsed.applied_rules) ? parsed.applied_rules : [],
+        grammar_explanation: normalizeGrammarExplanationObject(parsed.grammar_explanation)
       };
     } catch (err) {
       modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
@@ -1086,14 +1234,27 @@ function getActiveVariantObject() {
 
 function persistProofreadSession() {
   const inputEl = document.getElementById('proofreadOriginalInput');
+  const pageInputEl = document.getElementById('pageAssistantInput');
   const snapshot = {
     originalText: currentProofreadState.originalText,
     draftInputText: inputEl ? inputEl.value : currentProofreadState.originalText,
     detectedLanguage: currentProofreadState.detectedLanguage,
     summary: currentProofreadState.summary,
     activeStyle: currentProofreadState.activeStyle,
+    activeAnalysisTab: currentProofreadState.activeAnalysisTab,
     variants: currentProofreadState.variants,
     appliedRules: currentProofreadState.appliedRules,
+    grammarExplanation: currentProofreadState.grammarExplanation,
+    pageAssistant: {
+      prompt: pageInputEl ? pageInputEl.value : (currentProofreadState.pageAssistant?.prompt || ''),
+      answer: currentProofreadState.pageAssistant?.answer || '',
+      answeredScope: currentProofreadState.pageAssistant?.answeredScope || 'page',
+      selectedText: currentProofreadState.pageAssistant?.selectedText || '',
+      ignoreSelection: Boolean(currentProofreadState.pageAssistant?.ignoreSelection),
+      pageTitle: currentProofreadState.pageAssistant?.pageTitle || '',
+      pageUrl: currentProofreadState.pageAssistant?.pageUrl || '',
+      charCount: currentProofreadState.pageAssistant?.charCount || 0
+    },
     displayMode: currentProofreadState.displayMode,
     strictC1C2: currentProofreadState.strictC1C2,
     quickMode: currentProofreadState.quickMode,
@@ -1111,12 +1272,39 @@ function persistProofreadSession() {
 function restoreProofreadSessionSnapshot(saved) {
   if (!saved || typeof saved !== 'object' || !saved.variants) return false;
   const inputEl = document.getElementById('proofreadOriginalInput');
+  const pageInputEl = document.getElementById('pageAssistantInput');
   currentProofreadState.originalText = typeof saved.originalText === 'string' ? saved.originalText : '';
   currentProofreadState.detectedLanguage = saved.detectedLanguage || 'uk';
   currentProofreadState.summary = saved.summary || '';
   currentProofreadState.activeStyle = PROOFREAD_STYLE_META[saved.activeStyle] ? saved.activeStyle : 'default';
+  currentProofreadState.activeAnalysisTab = ['rules', 'grammar', 'page'].includes(saved.activeAnalysisTab)
+    ? saved.activeAnalysisTab
+    : 'rules';
   currentProofreadState.variants = normalizeVariantsObject({ variants: saved.variants }, currentProofreadState.originalText);
   currentProofreadState.appliedRules = Array.isArray(saved.appliedRules) ? saved.appliedRules : [];
+
+  if (saved.grammarExplanation && (saved.grammarExplanation.sentence_type || (saved.grammarExplanation.items && saved.grammarExplanation.items.length > 0))) {
+    currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(saved.grammarExplanation);
+  } else {
+    const fallbackSim = simulateProofreadPipeline(currentProofreadState.originalText);
+    currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(fallbackSim.grammar_explanation);
+  }
+
+  if (saved.pageAssistant && typeof saved.pageAssistant === 'object') {
+    currentProofreadState.pageAssistant = {
+      ...currentProofreadState.pageAssistant,
+      prompt: typeof saved.pageAssistant.prompt === 'string' ? saved.pageAssistant.prompt : '',
+      answer: typeof saved.pageAssistant.answer === 'string' ? saved.pageAssistant.answer : '',
+      answeredScope: saved.pageAssistant.answeredScope === 'selection' ? 'selection' : 'page',
+      selectedText: typeof saved.pageAssistant.selectedText === 'string' ? saved.pageAssistant.selectedText : '',
+      ignoreSelection: Boolean(saved.pageAssistant.ignoreSelection),
+      pageTitle: typeof saved.pageAssistant.pageTitle === 'string' ? saved.pageAssistant.pageTitle : '',
+      pageUrl: typeof saved.pageAssistant.pageUrl === 'string' ? saved.pageAssistant.pageUrl : '',
+      charCount: Number(saved.pageAssistant.charCount) || 0,
+      isLoading: false
+    };
+  }
+
   currentProofreadState.displayMode = saved.displayMode === 'inline' ? 'inline' : 'wavy';
   if (typeof saved.strictC1C2 === 'boolean') {
     currentProofreadState.strictC1C2 = saved.strictC1C2;
@@ -1132,6 +1320,9 @@ function restoreProofreadSessionSnapshot(saved) {
       ? saved.draftInputText
       : currentProofreadState.originalText;
   }
+  if (pageInputEl && currentProofreadState.pageAssistant.prompt) {
+    pageInputEl.value = currentProofreadState.pageAssistant.prompt;
+  }
   renderProofreadView();
   return true;
 }
@@ -1143,9 +1334,173 @@ function selectProofreadStyle(styleKey) {
   renderProofreadView();
 }
 
+function selectAnalysisTab(tabKey) {
+  if (!['rules', 'grammar', 'page'].includes(tabKey)) return;
+  currentProofreadState.activeAnalysisTab = tabKey;
+  persistProofreadSession();
+  renderProofreadView();
+  if (tabKey === 'page') {
+    syncActiveTabSelection();
+  }
+}
+
+function renderGrammarExplanationView() {
+  const containerEl = document.getElementById('grammarExplanationContainer');
+  const badgeEl = document.getElementById('grammarExplanationTabBadge');
+  if (!containerEl) return;
+
+  const grammar = normalizeGrammarExplanationObject(currentProofreadState.grammarExplanation);
+  const items = grammar.items || [];
+
+  if (badgeEl) {
+    badgeEl.textContent = String(items.length);
+  }
+
+  if (currentProofreadState.isLoading || currentProofreadState.isExplainingRules) {
+    containerEl.innerHTML = `
+      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-sky-300 italic">
+        ⏳ Аналізую синтаксичну будову, часові форми та граматичні конструкції речення...
+      </div>
+    `;
+    return;
+  }
+
+  const hasOverview = Boolean(grammar.sentence_type || grammar.syntax_formula || grammar.tense_and_mood);
+  if (!hasOverview && items.length === 0) {
+    containerEl.innerHTML = `
+      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-slate-300">
+        ⚡ Натисніть <b class="text-amber-300">«🧬 Поясни граматику»</b> (або «📚 Поясни правила») вище, щоб отримати повний синтаксичний та граматичний розбір речення.
+      </div>
+    `;
+    return;
+  }
+
+  const overviewHtml = hasOverview
+    ? `
+      <div class="grammar-overview-card">
+        ${grammar.sentence_type ? `
+          <div class="grammar-overview-item">
+            <span class="grammar-overview-label">📐 Структура та тип речення</span>
+            <div class="grammar-overview-value">${safeEscapeHtml(grammar.sentence_type)}</div>
+          </div>
+        ` : ''}
+        ${grammar.syntax_formula ? `
+          <div class="grammar-overview-item">
+            <span class="grammar-overview-label">🧩 Синтаксична формула (Structure)</span>
+            <div class="grammar-formula-box">${safeEscapeHtml(grammar.syntax_formula)}</div>
+          </div>
+        ` : ''}
+        ${grammar.tense_and_mood ? `
+          <div class="grammar-overview-item">
+            <span class="grammar-overview-label">⏱️ Час, вид, стан і спосіб (Tense / Aspect / Mood)</span>
+            <div class="grammar-overview-value">${safeEscapeHtml(grammar.tense_and_mood)}</div>
+          </div>
+        ` : ''}
+      </div>
+    `
+    : '';
+
+  const itemsHtml = items.map((item, idx) => `
+    <div class="grammar-item-card">
+      <div class="sp-rule-top">
+        <span class="sp-rule-title">${safeEscapeHtml(item.rule_title || 'Граматичне правило')}</span>
+        <span class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border bg-sky-950/90 text-sky-300 border-sky-700/70" style="flex-shrink: 0;">
+          #${idx + 1} • ${safeEscapeHtml(item.grammar_role || 'Конструкція')}
+        </span>
+      </div>
+      ${item.fragment ? `<div class="grammar-fragment-chip">${safeEscapeHtml(item.fragment)}</div>` : ''}
+      <p class="sp-rule-desc">${safeEscapeHtml(item.explanation || '')}</p>
+    </div>
+  `).join('');
+
+  containerEl.innerHTML = overviewHtml + itemsHtml;
+}
+
+function renderPageAssistantView() {
+  const pa = currentProofreadState.pageAssistant || {};
+  const metaEl = document.getElementById('pageAssistantContextMeta');
+  const selCardEl = document.getElementById('pageAssistantSelectionCard');
+  const selPreviewEl = document.getElementById('pageAssistantSelectionPreview');
+  const selDotEl = document.getElementById('pageSelectionActiveDot');
+  const askBtnEl = document.getElementById('btnAskPageAssistant');
+  const resultWrapEl = document.getElementById('pageAssistantResultWrap');
+  const answerBoxEl = document.getElementById('pageAssistantAnswerBox');
+  const scopeBadgeEl = document.getElementById('pageAssistantScopeBadge');
+
+  const hasActiveSelection = Boolean(pa.selectedText && !pa.ignoreSelection);
+
+  if (selDotEl) {
+    selDotEl.classList.toggle('hidden', !hasActiveSelection);
+  }
+
+  if (metaEl) {
+    if (pa.pageTitle || pa.pageUrl) {
+      let hostLabel = '';
+      try {
+        hostLabel = pa.pageUrl ? new URL(pa.pageUrl).hostname : '';
+      } catch (e) {}
+      const titleShort = pa.pageTitle ? pa.pageTitle.slice(0, 68) : hostLabel || 'Поточна сторінка';
+      const charsInfo = pa.charCount > 0 ? ` • ${(pa.charCount / 1000).toFixed(1)}k симв.` : '';
+      metaEl.innerHTML = `📄 <b class="text-slate-100">${safeEscapeHtml(titleShort)}</b>${hostLabel ? ` <span class="text-slate-400">(${safeEscapeHtml(hostLabel)}${charsInfo})</span>` : ''}`;
+    } else {
+      metaEl.textContent = '📄 Контекст активної вкладки зчитується автоматично під час запиту';
+    }
+  }
+
+  if (selCardEl && selPreviewEl) {
+    if (hasActiveSelection) {
+      selCardEl.classList.remove('hidden');
+      selPreviewEl.textContent = `«${pa.selectedText}»`;
+    } else {
+      selCardEl.classList.add('hidden');
+      selPreviewEl.textContent = '';
+    }
+  }
+
+  if (askBtnEl) {
+    if (pa.isLoading) {
+      askBtnEl.disabled = true;
+      askBtnEl.textContent = hasActiveSelection
+        ? '⏳ Аналізую виділений фрагмент на сторінці...'
+        : '⏳ Аналізую сторінку та готую відповідь...';
+    } else {
+      askBtnEl.disabled = false;
+      askBtnEl.textContent = hasActiveSelection
+        ? '🎯 Запитати про виділений фрагмент'
+        : '🤖 Запитати по сторінці';
+    }
+  }
+
+  if (resultWrapEl && answerBoxEl) {
+    if (pa.isLoading) {
+      resultWrapEl.classList.remove('hidden');
+      answerBoxEl.innerHTML = `<span class="text-slate-400 italic text-xs">ШІ читає ${hasActiveSelection ? 'виділений фрагмент та контекст сторінки' : 'вміст активної сторінки'} і формує відповідь...</span>`;
+    } else if (pa.answer) {
+      resultWrapEl.classList.remove('hidden');
+      answerBoxEl.textContent = pa.answer;
+      if (scopeBadgeEl) {
+        if (pa.answeredScope === 'selection') {
+          scopeBadgeEl.textContent = '🎯 Виділений фрагмент';
+          scopeBadgeEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950/90 text-amber-300 border border-amber-700/70';
+        } else {
+          scopeBadgeEl.textContent = '🌐 Уся сторінка';
+          scopeBadgeEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/70';
+        }
+      }
+    } else {
+      resultWrapEl.classList.add('hidden');
+      answerBoxEl.textContent = '';
+    }
+  }
+}
+
 function renderProofreadView() {
   const resultBoxEl = document.getElementById('proofreadResultBox');
   const rulesContainerEl = document.getElementById('proofreadRulesContainer');
+  const rulesTabBadgeEl = document.getElementById('appliedRulesTabBadge');
+  const rulesPanelEl = document.getElementById('proofreadRulesPanel');
+  const grammarPanelEl = document.getElementById('grammarExplanationPanel');
+  const pagePanelEl = document.getElementById('pageAssistantPanel');
   const badgeCountEl = document.getElementById('proofreadChangesCountBadge');
   const summaryEl = document.getElementById('proofreadSummaryText');
   const styleNoteEl = document.getElementById('proofreadStyleNote');
@@ -1156,6 +1511,7 @@ function renderProofreadView() {
   const btnToggleCam = document.getElementById('btnToggleCamC1C2');
   const btnToggleQuick = document.getElementById('btnToggleQuickMode');
   const btnExplainRules = document.getElementById('btnExplainRules');
+  const btnExplainGrammar = document.getElementById('btnExplainGrammar');
   const runBtn = document.getElementById('btnRunProofread');
 
   if (!resultBoxEl || !rulesContainerEl) return;
@@ -1168,13 +1524,20 @@ function renderProofreadView() {
       ? '⏳ Пояснюю...'
       : '📚 Поясни правила';
   }
+  if (btnExplainGrammar) {
+    btnExplainGrammar.disabled = Boolean(currentProofreadState.isLoading || currentProofreadState.isExplainingRules);
+    btnExplainGrammar.textContent = currentProofreadState.isExplainingRules
+      ? '⏳ Пояснюю...'
+      : '🧬 Поясни граматику';
+  }
 
-  // Sync Quick Mode vs 4-Styles Mode toggle button & visibility
+  // Варіант 2: "🔍 Стандарт" is the fast default mode; "🎨 +3 Стилі" toggles generation of Short / Formal / Corp
   if (btnToggleQuick) {
-    btnToggleQuick.classList.toggle('ext-btn-quick-active', isQuick);
-    btnToggleQuick.classList.toggle('ext-btn-styles-active', !isQuick);
-    btnToggleQuick.setAttribute('aria-pressed', String(isQuick));
-    btnToggleQuick.textContent = isQuick ? '⚡ Швидкий' : '🎨 4 Стилі';
+    const stylesEnabled = !isQuick;
+    btnToggleQuick.classList.toggle('ext-btn-styles-active', stylesEnabled);
+    btnToggleQuick.classList.toggle('ext-btn-quick-active', !stylesEnabled);
+    btnToggleQuick.setAttribute('aria-pressed', String(stylesEnabled));
+    btnToggleQuick.textContent = stylesEnabled ? '🎨 +3 Стилі: ON' : '🎨 +3 Стилі: OFF';
   }
   if (styleBarEl) {
     styleBarEl.classList.toggle('hidden', isQuick);
@@ -1184,9 +1547,25 @@ function renderProofreadView() {
   }
   if (modeSubtitleEl) {
     modeSubtitleEl.textContent = isQuick
-      ? '⚡ Швидка перевірка + правила'
-      : '🎨 1 запит → 4 стилі + правила';
+      ? '🔍 Стандарт (Fast) • Граматика • Page AI'
+      : '🎨 Стандарт + 3 стилі • Граматика • Page AI';
   }
+
+  // Sync 3-Tab Analysis Switcher (Застосовані правила | Grammar explanation | Page AI)
+  const activeTab = currentProofreadState.activeAnalysisTab || 'rules';
+  document.querySelectorAll('.sp-analysis-tab').forEach(btn => {
+    const tabKey = btn.getAttribute('data-analysis-tab');
+    const isSelected = tabKey === activeTab;
+    btn.classList.toggle('sp-analysis-tab-active', isSelected);
+    btn.setAttribute('aria-selected', String(isSelected));
+  });
+  if (rulesPanelEl) rulesPanelEl.classList.toggle('hidden', activeTab !== 'rules');
+  if (grammarPanelEl) grammarPanelEl.classList.toggle('hidden', activeTab !== 'grammar');
+  if (pagePanelEl) pagePanelEl.classList.toggle('hidden', activeTab !== 'page');
+
+  // Always keep Tab 2 and Tab 3 views synced
+  renderGrammarExplanationView();
+  renderPageAssistantView();
 
   // Sync Cambridge C1/C2 strict mode toggle button
   if (btnToggleCam) {
@@ -1218,8 +1597,8 @@ function renderProofreadView() {
     if (runBtn) {
       runBtn.disabled = true;
       runBtn.textContent = isQuick
-        ? '⏳ Швидка перевірка тексту...'
-        : '⏳ Генерую 4 стилі + правила...';
+        ? '⏳ Швидка перевірка (🔍 Стандарт)...'
+        : '⏳ Генерую Стандарт + 3 стилі...';
     }
     if (badgeCountEl) {
       badgeCountEl.textContent = '⏳ Перевірка...';
@@ -1227,8 +1606,8 @@ function renderProofreadView() {
     }
     resultBoxEl.innerHTML = `<span class="text-slate-400 italic text-xs">${
       isQuick
-        ? 'ШІ швидко перевіряє граматику оригіналу та формує пояснення правил...'
-        : 'ШІ перевіряє текст та готує варіанти Default / Short / Formal / Corp в 1 запит...'
+        ? 'ШІ миттєво перевіряє текст у режимі «🔍 Стандарт»...'
+        : 'ШІ перевіряє текст та готує «🔍 Стандарт» + 3 додаткові стилі (Short / Formal / Corp)...'
     }</span>`;
     return;
   }
@@ -1293,10 +1672,14 @@ function renderProofreadView() {
   }
 
   const rules = currentProofreadState.appliedRules || [];
+  if (rulesTabBadgeEl) {
+    rulesTabBadgeEl.textContent = String(rules.length);
+  }
+
   if (currentProofreadState.isExplainingRules) {
     rulesContainerEl.innerHTML = `
       <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-amber-300 italic">
-        ⏳ Формую детальні пояснення граматичних правил для виправлень...
+        ⏳ Формую детальні пояснення граматичних правил та синтаксичний розбір речення...
       </div>
     `;
     return;
@@ -1306,13 +1689,13 @@ function renderProofreadView() {
     if (changeCount > 0) {
       rulesContainerEl.innerHTML = `
         <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-slate-300">
-          ⚡ Виправлення виконано миттєво без генерації описів правил. Натисніть <b class="text-amber-300">«📚 Поясни правила»</b> вище, щоб розібрати кожну правку.
+          ⚡ Виправлення в режимі «🔍 Стандарт» виконано миттєво. Натисніть <b class="text-amber-300">«📚 Поясни правила»</b> вище, щоб розібрати кожну правку та граматику.
         </div>
       `;
     } else {
       rulesContainerEl.innerHTML = `
         <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3 text-center text-[11px] text-emerald-300">
-          ✨ Текст написаний грамотно! Жодних граматичних чи пунктуаційних виправлень не знадобилося.
+          ✨ Текст написаний грамотно! Жодних виправлень не знадобилося. Натисніть <b>«📚 Поясни правила»</b> або перейдіть у <b>🧬 Grammar explanation</b> для розбору будови речення.
         </div>
       `;
     }
@@ -1363,6 +1746,341 @@ function renderProofreadView() {
   });
 }
 
+// =========================================================================
+// TAB 3: SELECTION-AWARE PAGE ASSISTANT (CONTEXT EXTRACTION & GEMINI Q&A)
+// =========================================================================
+
+async function syncActiveTabSelection(forceResetIgnore = false) {
+  const pa = currentProofreadState.pageAssistant;
+  if (!pa) return;
+
+  if (isChromeExtensionEnv() && chrome.tabs && chrome.scripting) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !tab.id || /^(chrome|edge|about|chrome-extension):/i.test(tab.url || '')) {
+        return;
+      }
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const sel = (window.getSelection ? window.getSelection().toString() : '').trim();
+          const bodyText = document.body ? document.body.innerText || '' : '';
+          return {
+            selectedText: sel.slice(0, 6000),
+            title: document.title || '',
+            url: location.href || '',
+            charCount: bodyText.length
+          };
+        }
+      });
+      const info = results?.[0]?.result;
+      if (!info) return;
+
+      let changed = false;
+      if (info.title && info.title !== pa.pageTitle) {
+        pa.pageTitle = info.title;
+        changed = true;
+      }
+      if (info.url && info.url !== pa.pageUrl) {
+        pa.pageUrl = info.url;
+        changed = true;
+      }
+      if (typeof info.charCount === 'number' && info.charCount !== pa.charCount) {
+        pa.charCount = info.charCount;
+        changed = true;
+      }
+
+      const liveSel = (info.selectedText || '').trim();
+      if (liveSel !== pa.selectedText) {
+        pa.selectedText = liveSel;
+        if (liveSel) {
+          // Automatically prioritize newly selected text on the page
+          pa.ignoreSelection = false;
+        }
+        changed = true;
+      } else if (forceResetIgnore && liveSel) {
+        pa.ignoreSelection = false;
+        changed = true;
+      }
+
+      if (changed) {
+        renderPageAssistantView();
+      }
+    } catch (e) {
+      // Tab may block scripting (e.g., Chrome Web Store); ignore silently
+    }
+    return;
+  }
+
+  // Fallback for standalone preview in browser tab
+  const localSel = (window.getSelection ? window.getSelection().toString() : '').trim();
+  const activeEl = document.activeElement;
+  const isInternalSelection = activeEl && (activeEl.id === 'proofreadOriginalInput' || activeEl.id === 'pageAssistantInput');
+  if (!isInternalSelection && localSel && localSel !== pa.selectedText) {
+    pa.selectedText = localSel;
+    pa.ignoreSelection = false;
+    renderPageAssistantView();
+  }
+}
+
+async function extractActiveTabPageContext() {
+  const pa = currentProofreadState.pageAssistant;
+
+  if (isChromeExtensionEnv() && chrome.tabs && chrome.scripting) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab && tab.id && !/^(chrome|edge|about|chrome-extension):/i.test(tab.url || '')) {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const selObj = window.getSelection ? window.getSelection() : null;
+            const selectedText = (selObj ? selObj.toString() : '').trim();
+
+            // Also capture immediate surrounding paragraph/block around the selection
+            let selectionSurrounding = '';
+            if (selObj && selObj.rangeCount > 0 && selectedText) {
+              let node = selObj.getRangeAt(0).commonAncestorContainer;
+              if (node && node.nodeType === 3) node = node.parentElement;
+              const blockEl = node?.closest?.('p, li, td, article, section, div') || node;
+              if (blockEl && typeof blockEl.innerText === 'string') {
+                selectionSurrounding = blockEl.innerText.replace(/\s+/g, ' ').trim().slice(0, 2500);
+              }
+            }
+
+            const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
+            const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
+              .map(h => (h.innerText || '').replace(/\s+/g, ' ').trim())
+              .filter(Boolean)
+              .slice(0, 25);
+
+            const mainRoot = document.querySelector('article, main, [role="main"]') || document.body;
+            const rawBody = (mainRoot ? mainRoot.innerText : document.body?.innerText) || '';
+            const cleanBody = rawBody.replace(/\n{3,}/g, '\n\n').trim().slice(0, 28000);
+
+            return {
+              title: document.title || '',
+              url: location.href || '',
+              metaDescription: metaDesc.trim(),
+              selectedText: selectedText.slice(0, 6000),
+              selectionSurrounding,
+              headings,
+              bodyText: cleanBody,
+              charCount: rawBody.length
+            };
+          }
+        });
+
+        const ctx = results?.[0]?.result;
+        if (ctx) {
+          if (ctx.selectedText && ctx.selectedText !== pa.selectedText) {
+            pa.selectedText = ctx.selectedText;
+            pa.ignoreSelection = false;
+          } else if (!ctx.selectedText && pa.selectedText && !pa.ignoreSelection) {
+            // Keep previously captured selection if user clicked inside Side Panel and page lost selection focus
+            ctx.selectedText = pa.selectedText;
+          }
+          pa.pageTitle = ctx.title || tab.title || '';
+          pa.pageUrl = ctx.url || tab.url || '';
+          pa.charCount = ctx.charCount || ctx.bodyText.length;
+          return ctx;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Fallback context (when opened directly or on a browser system page)
+  const editorText = (document.getElementById('proofreadOriginalInput')?.value || currentProofreadState.originalText || '').trim();
+  const effectiveSel = (!pa.ignoreSelection && pa.selectedText) ? pa.selectedText : '';
+  return {
+    title: pa.pageTitle || document.title || 'Поточна вкладка / Редактор',
+    url: pa.pageUrl || location.href || '',
+    metaDescription: '',
+    selectedText: effectiveSel,
+    selectionSurrounding: '',
+    headings: [],
+    bodyText: editorText || document.body?.innerText?.slice(0, 12000) || '',
+    charCount: (editorText || '').length
+  };
+}
+
+const PAGE_ASSISTANT_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    answer: { type: 'string' },
+    answered_scope: { type: 'string' }
+  },
+  required: ['answer', 'answered_scope']
+};
+
+async function callGeminiPageAssistantApi(userQuestion, pageContext, signal = null) {
+  const apiKey = getProofreadApiKey();
+  const pa = currentProofreadState.pageAssistant;
+  const activeSelection = (!pa.ignoreSelection && pageContext.selectedText)
+    ? pageContext.selectedText.trim()
+    : '';
+  const hasPrioritySelection = Boolean(activeSelection);
+
+  if (!apiKey) {
+    await new Promise(r => setTimeout(r, 200));
+    const scopeLabel = hasPrioritySelection
+      ? `🎯 Пріоритетний виділений фрагмент (${activeSelection.length} симв.):\n«${activeSelection.slice(0, 350)}${activeSelection.length > 350 ? '...' : ''}»`
+      : `🌐 Контекст сторінки: «${pageContext.title || 'Поточна вкладка'}» (${pageContext.bodyText.length} симв.)`;
+    return {
+      answered_scope: hasPrioritySelection ? 'selection' : 'page',
+      answer: `🔑 Для отримання відповідей Page AI підключіть ваш Gemini API-ключ у верхньому блоці «🔑 Gemini API та модель» і натисніть «Зберегти».\n\nЩо вже успішно зчитано для вашого запиту:\n${scopeLabel}\n\nВаш запит: «${userQuestion}»`
+    };
+  }
+
+  const sysInstruction = `Ти — розумний ШІ-асистент по вебсторінці (Page Assistant) у бічній панелі браузера.
+Твоє завдання — дати точну, вичерпну та добре структуровану відповідь на запитання або промпт користувача на основі переданого контексту поточної сторінки.
+
+ГОЛОВНЕ ПРАВИЛО ПРІОРИТЕТУ ВИДІЛЕНОГО ТЕКСТУ:
+1. Якщо передано непорожній блок [ВИДІЛЕНИЙ КОРИСТУВАЧЕМ ТЕКСТ НА СТОРІНЦІ (НАЙВИЩИЙ ПРІОРИТЕТ)] — користувач спеціально виділив цей фрагмент мишкою! Ти ОБОВ'ЯЗКОВО маєш відповідати на запитання/промпт насамперед про цей виділений фрагмент, розбираючи саме його зміст, терміни, граматику чи питання в ньому.
+2. Весь інший текст сторінки [ПОВНИЙ ТЕКСТ СТОРІНКИ (ДОПОМІЖНИЙ КОНТЕКСТ)] використовуй як фоновий контекст (щоб розуміти загальну тему статті, розшифровувати займенники чи зв'язок із сусідніми абзацами).
+3. Якщо виділеного тексту немає — відповідай на запитання за всім вмістом сторінки.
+4. Відповідай тією мовою, якою написано запитання користувача (за замовчуванням — українською). Використовуй зручні абзаци та списки (• або 1., 2.) для легкості читання.
+5. Поверни JSON-об'єкт: { "answer": "текст відповіді", "answered_scope": "selection" | "page" }.`;
+
+  const selectionBlock = hasPrioritySelection
+    ? `\n=== 🎯 ВИДІЛЕНИЙ КОРИСТУВАЧЕМ ТЕКСТ НА СТОРІНЦІ (НАЙВИЩИЙ ПРІОРИТЕТ — ВІДПОВІДАЙ НАСАМПЕРЕД ПРО ЦЕЙ ФРАГМЕНТ) ===\n"""\n${activeSelection}\n"""\n${pageContext.selectionSurrounding ? `\n[Сусідній абзац навколо виділення]:\n"""\n${pageContext.selectionSurrounding}\n"""\n` : ''}`
+    : '\n[Виділеного фрагмента немає — аналізуй усю сторінку]\n';
+
+  const headingsBlock = Array.isArray(pageContext.headings) && pageContext.headings.length > 0
+    ? `\n[Заголовки сторінки]: ${pageContext.headings.join(' | ')}\n`
+    : '';
+
+  const userPrompt = `[Сторінка]: ${pageContext.title || 'Без назви'}
+[URL]: ${pageContext.url || '—'}
+${pageContext.metaDescription ? `[Опис]: ${pageContext.metaDescription}\n` : ''}${headingsBlock}${selectionBlock}
+=== 📄 ПОВНИЙ ТЕКСТ СТОРІНКИ (${hasPrioritySelection ? 'ДОПОМІЖНИЙ КОНТЕКСТ' : 'ОСНОВНИЙ КОНТЕКСТ'}) ===
+"""
+${pageContext.bodyText || '(Текст сторінки порожній)'}
+"""
+
+=== ❓ ЗАПИТАННЯ / ПРОМПТ КОРИСТУВАЧА ===
+${userQuestion}`;
+
+  const modelsToTry = getProofreadModelCandidates();
+  const deadline = Date.now() + 26000;
+  const modelErrors = [];
+
+  for (const modelId of modelsToTry) {
+    const remainingMs = deadline - Date.now();
+    if ((signal && signal.aborted) || remainingMs < 1500) break;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), remainingMs);
+    const onAbort = () => controller.abort();
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
+      let response = await fetch(interactionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+          'Api-Revision': '2026-05-20'
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: modelId,
+          system_instruction: sysInstruction,
+          input: userPrompt,
+          response_format: PAGE_ASSISTANT_JSON_SCHEMA
+        })
+      });
+
+      if (!response.ok && (response.status === 404 || response.status === 400)) {
+        const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        response = await fetch(generateUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: sysInstruction }] },
+            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+            generationConfig: {
+              responseMimeType: 'application/json'
+            }
+          })
+        });
+      }
+
+      clearTimeout(timeoutId);
+      if (!response.ok) {
+        let apiErrDetail = '';
+        try {
+          const errObj = await response.json();
+          apiErrDetail = errObj?.error?.message || '';
+        } catch (e) {}
+        const msg = `HTTP ${response.status} (${modelId})${apiErrDetail ? ': ' + apiErrDetail : ''}`;
+        modelErrors.push(msg);
+        if (response.status === 404 || response.status === 503) continue;
+        throw new Error(msg);
+      }
+
+      const data = await response.json();
+      const parsed = extractGeminiJsonObject(data);
+      return {
+        answer: (parsed.answer || '').trim() || 'Модель не повернула текст відповіді.',
+        answered_scope: hasPrioritySelection ? 'selection' : (parsed.answered_scope === 'selection' ? 'selection' : 'page')
+      };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
+    } finally {
+      if (signal) signal.removeEventListener('abort', onAbort);
+    }
+  }
+
+  throw new Error(modelErrors[0] || 'Не вдалося виконати запит до Gemini API');
+}
+
+async function runPageAssistantQuery(customPrompt = null) {
+  const inputEl = document.getElementById('pageAssistantInput');
+  const pa = currentProofreadState.pageAssistant;
+  if (!inputEl || !pa) return;
+
+  if (typeof customPrompt === 'string' && customPrompt.trim()) {
+    inputEl.value = customPrompt.trim();
+  }
+
+  // First sync live page context & selection right before sending
+  const pageContext = await extractActiveTabPageContext();
+  const hasPrioritySelection = Boolean(pageContext.selectedText && !pa.ignoreSelection);
+
+  let question = inputEl.value.trim();
+  if (!question) {
+    if (hasPrioritySelection) {
+      question = 'Поясни детально зміст, головну думку та ключові деталі цього виділеного фрагмента.';
+      inputEl.value = question;
+    } else {
+      notifyProofreadToast('Введіть запитання або оберіть швидкий промпт вище');
+      inputEl.focus();
+      return;
+    }
+  }
+
+  pa.prompt = question;
+  pa.isLoading = true;
+  renderPageAssistantView();
+
+  try {
+    const res = await callGeminiPageAssistantApi(question, pageContext);
+    pa.answer = res.answer;
+    pa.answeredScope = res.answered_scope || (hasPrioritySelection ? 'selection' : 'page');
+  } catch (err) {
+    const errMsg = err?.message || 'Помилка запиту до Gemini API';
+    pa.answer = `❌ Помилка API: ${errMsg}`;
+    notifyProofreadToast(`❌ ${errMsg}`);
+  } finally {
+    pa.isLoading = false;
+    persistProofreadSession();
+    renderPageAssistantView();
+  }
+}
+
 async function runProofreadTool(customText = null) {
   const inputEl = document.getElementById('proofreadOriginalInput');
   if (!inputEl) return;
@@ -1390,6 +2108,7 @@ async function runProofreadTool(customText = null) {
     currentProofreadState.summary = res.summary || '';
     currentProofreadState.variants = res.variants;
     currentProofreadState.appliedRules = res.applied_rules || [];
+    currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(res.grammar_explanation);
     currentProofreadState.usedOfflineFallback = Boolean(res.usedOfflineFallback);
 
     if (res.isUnconfiguredCustomText) {
@@ -1410,6 +2129,7 @@ async function runProofreadTool(customText = null) {
       corp: { text: '', note: '' }
     };
     currentProofreadState.appliedRules = [];
+    currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(null);
     currentProofreadState.usedOfflineFallback = false;
     notifyProofreadToast(`❌ ${errMsg}`);
   } finally {
@@ -1422,14 +2142,10 @@ async function runProofreadTool(customText = null) {
 async function explainProofreadRulesOnly() {
   const orig = (currentProofreadState.originalText || '').trim();
   const activeVar = getActiveVariantObject();
-  const corr = (activeVar.text || '').trim();
+  const corr = (activeVar.text || orig).trim();
 
-  if (!orig || !corr) {
+  if (!orig) {
     notifyProofreadToast('Спочатку перевірте текст кнопкою «Перевірити та виправити»');
-    return;
-  }
-  if (orig === corr) {
-    notifyProofreadToast('✨ Між оригіналом та результатом немає розбіжностей');
     return;
   }
 
@@ -1440,6 +2156,7 @@ async function explainProofreadRulesOnly() {
     const res = await callGeminiExplainRulesApi(orig, corr);
     currentProofreadState.summary = res.summary || '';
     currentProofreadState.appliedRules = res.applied_rules || [];
+    currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(res.grammar_explanation);
     persistProofreadSession();
   } catch (err) {
     notifyProofreadToast(`❌ ${err?.message || 'Помилка генерації правил'}`);
@@ -1460,6 +2177,7 @@ function applyInitialProofreadData(presetText) {
   currentProofreadState.summary = initialResult.summary;
   currentProofreadState.variants = normalizeVariantsObject(initialResult, presetText);
   currentProofreadState.appliedRules = initialResult.applied_rules;
+  currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(initialResult.grammar_explanation);
   renderProofreadView();
 }
 
@@ -1486,6 +2204,10 @@ function initParentToolsUi() {
   });
 
   document.getElementById('btnExplainRules')?.addEventListener('click', () => {
+    explainProofreadRulesOnly();
+  });
+
+  document.getElementById('btnExplainGrammar')?.addEventListener('click', () => {
     explainProofreadRulesOnly();
   });
 
@@ -1522,12 +2244,86 @@ function initParentToolsUi() {
       renderProofreadView();
       notifyProofreadToast(
         isQuick
-          ? '⚡ Увімкнено Швидкий режим (лише виправлення оригіналу + правила)'
-          : '🎨 Увімкнено режим 4 стилів (Стандарт / Short / Formal / Corp)'
+          ? '🔍 Режим «Тільки Стандарт» (миттєва перевірка без додаткових стилів)'
+          : '🎨 Увімкнено «+3 Стилі» (разом зі Стандарт генеруються Short / Formal / Corp)'
       );
     });
   }
 
+  // 3-Tab Switcher Listeners (Застосовані правила | Grammar explanation | Page AI)
+  document.querySelectorAll('.sp-analysis-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabKey = btn.getAttribute('data-analysis-tab') || 'rules';
+      selectAnalysisTab(tabKey);
+    });
+  });
+
+  // Page Assistant Listeners
+  const pageInputEl = document.getElementById('pageAssistantInput');
+  if (pageInputEl) {
+    pageInputEl.addEventListener('input', () => {
+      currentProofreadState.pageAssistant.prompt = pageInputEl.value;
+      persistProofreadSession();
+    });
+    pageInputEl.addEventListener('focus', () => {
+      syncActiveTabSelection();
+    });
+    pageInputEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        runPageAssistantQuery();
+      }
+    });
+  }
+
+  document.getElementById('btnClearPagePrompt')?.addEventListener('click', () => {
+    if (pageInputEl) {
+      pageInputEl.value = '';
+      currentProofreadState.pageAssistant.prompt = '';
+      persistProofreadSession();
+      pageInputEl.focus();
+    }
+  });
+
+  document.getElementById('btnAskPageAssistant')?.addEventListener('click', () => {
+    runPageAssistantQuery();
+  });
+
+  document.getElementById('btnRefreshPageContext')?.addEventListener('click', async () => {
+    await syncActiveTabSelection(true);
+    const pa = currentProofreadState.pageAssistant;
+    if (pa.selectedText && !pa.ignoreSelection) {
+      notifyProofreadToast(`🎯 Зчитано виділений фрагмент (${pa.selectedText.length} симв.)`);
+    } else {
+      notifyProofreadToast('📄 Контекст активної сторінки оновлено!');
+    }
+  });
+
+  document.getElementById('btnClearPageSelectionFocus')?.addEventListener('click', () => {
+    currentProofreadState.pageAssistant.ignoreSelection = true;
+    persistProofreadSession();
+    renderPageAssistantView();
+    notifyProofreadToast('🌐 Перемкнено на аналіз усієї сторінки');
+  });
+
+  document.querySelectorAll('.page-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const presetPrompt = btn.getAttribute('data-page-preset') || '';
+      if (!presetPrompt) return;
+      runPageAssistantQuery(presetPrompt);
+    });
+  });
+
+  document.getElementById('btnCopyPageAnswer')?.addEventListener('click', async () => {
+    const answerText = (currentProofreadState.pageAssistant?.answer || '').trim();
+    if (!answerText) return;
+    try {
+      await navigator.clipboard.writeText(answerText);
+      notifyProofreadToast('📋 Відповідь Page AI скопійовано у буфер обміну!');
+    } catch (e) {
+      notifyProofreadToast('Не вдалося скопіювати автоматично — виділіть текст мишкою');
+    }
+  });
   const camToggleBtn = document.getElementById('btnToggleCamC1C2');
   if (camToggleBtn) {
     try {
@@ -1664,6 +2460,25 @@ function initChromeSidePanelExtras() {
   const extGrabBtn = document.getElementById('btnGrabPageSelection');
   const inputEl = document.getElementById('proofreadOriginalInput');
 
+  // Auto-sync live selection from the active tab when hovering/focusing Side Panel or periodically
+  window.addEventListener('focus', () => syncActiveTabSelection());
+  document.body?.addEventListener('mouseenter', () => syncActiveTabSelection());
+  setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      syncActiveTabSelection();
+    }
+  }, 1200);
+
+  if (isChromeExtensionEnv() && chrome.tabs) {
+    chrome.tabs.onActivated?.addListener(() => syncActiveTabSelection());
+    chrome.tabs.onUpdated?.addListener((_tabId, changeInfo) => {
+      if (changeInfo.status === 'complete') syncActiveTabSelection();
+    });
+  }
+
+  // Initial sync on open
+  syncActiveTabSelection();
+
   if (extKeyInput) {
     try {
       const savedKey = localStorage.getItem('chomuchka_ext_api_key') || '';
@@ -1679,7 +2494,8 @@ function initChromeSidePanelExtras() {
           const res = await chrome.storage.local.get([
             'chomuchka_ext_api_key',
             'chomuchka_proofread_session_v1',
-            'pendingProofreadText'
+            'pendingProofreadText',
+            'pendingPageAiSelection'
           ]);
           if (res.chomuchka_proofread_session_v1 && !localStorage.getItem('chomuchka_proofread_session_v1')) {
             restoreProofreadSessionSnapshot(res.chomuchka_proofread_session_v1);
@@ -1727,6 +2543,18 @@ function initChromeSidePanelExtras() {
               persistProofreadSession();
               inputEl.focus();
               notifyProofreadToast('📥 Текст вставлено в «Оригінал» — натисніть Перевірити або Ctrl+Enter');
+            }
+          }
+
+          if (res.pendingPageAiSelection && typeof res.pendingPageAiSelection === 'string') {
+            const selText = res.pendingPageAiSelection.trim();
+            await chrome.storage.local.remove('pendingPageAiSelection');
+            if (selText) {
+              currentProofreadState.pageAssistant.selectedText = selText;
+              currentProofreadState.pageAssistant.ignoreSelection = false;
+              selectAnalysisTab('page');
+              document.getElementById('pageAssistantInput')?.focus();
+              notifyProofreadToast('🎯 Виділений фрагмент підключено до Page AI — введіть запитання або оберіть шаблон');
             }
           }
         } catch (err) {
@@ -1782,7 +2610,10 @@ function initChromeSidePanelExtras() {
           persistProofreadSession();
           inputEl.focus();
         }
-        notifyProofreadToast('📥 Виділений текст вставлено в «Оригінал» — натисніть Перевірити або Ctrl+Enter');
+        currentProofreadState.pageAssistant.selectedText = selected;
+        currentProofreadState.pageAssistant.ignoreSelection = false;
+        renderPageAssistantView();
+        notifyProofreadToast('📥 Виділений текст вставлено в «Оригінал» та синхронізовано з Page AI');
       } catch (err) {
         notifyProofreadToast('Вставте текст у поле «Оригінал» через Ctrl+V');
       }
@@ -1792,14 +2623,23 @@ function initChromeSidePanelExtras() {
   // Listen for live right-click context menu selections while Side Panel is already open
   if (isChromeExtensionEnv() && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((msg) => {
-      if (msg && msg.type === 'PROOFREAD_SELECTION' && typeof msg.text === 'string' && msg.text.trim()) {
+      if (!msg || typeof msg.text !== 'string' || !msg.text.trim()) return;
+      const cleanText = msg.text.trim();
+
+      if (msg.type === 'PROOFREAD_SELECTION') {
         const inputEl = document.getElementById('proofreadOriginalInput');
         if (inputEl) {
-          inputEl.value = msg.text.trim();
+          inputEl.value = cleanText;
           persistProofreadSession();
           inputEl.focus();
         }
         notifyProofreadToast('📥 Текст вставлено в «Оригінал» — натисніть Перевірити або Ctrl+Enter');
+      } else if (msg.type === 'PAGE_AI_SELECTION') {
+        currentProofreadState.pageAssistant.selectedText = cleanText;
+        currentProofreadState.pageAssistant.ignoreSelection = false;
+        selectAnalysisTab('page');
+        document.getElementById('pageAssistantInput')?.focus();
+        notifyProofreadToast('🎯 Виділений фрагмент у пріоритеті Page AI — поставте запитання!');
       }
     });
   }

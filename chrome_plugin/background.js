@@ -14,13 +14,21 @@ chrome.runtime.onInstalled.addListener(async () => {
       title: '🔍 Виправити виділений текст у ШІ-редакторі',
       contexts: ['selection']
     });
+    chrome.contextMenus.create({
+      id: 'chomuchka_ask_page_ai_selection',
+      title: '🌐 Запитати Page AI про виділений текст',
+      contexts: ['selection']
+    });
   } catch (err) {
     console.error('Extension initialization error:', err);
   }
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId !== 'chomuchka_proofread_selection') return;
+  const isProofread = info.menuItemId === 'chomuchka_proofread_selection';
+  const isPageAi = info.menuItemId === 'chomuchka_ask_page_ai_selection';
+  if (!isProofread && !isPageAi) return;
+
   const selectedText = (info.selectionText || '').trim();
   if (!selectedText) return;
 
@@ -30,18 +38,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       ? chrome.sidePanel.open({ windowId: tab.windowId })
       : Promise.resolve();
 
-    await chrome.storage.local.set({ pendingProofreadText: selectedText });
+    if (isPageAi) {
+      await chrome.storage.local.set({ pendingPageAiSelection: selectedText });
+    } else {
+      await chrome.storage.local.set({ pendingProofreadText: selectedText });
+    }
     await openPromise;
 
     try {
       await chrome.runtime.sendMessage({
-        type: 'PROOFREAD_SELECTION',
+        type: isPageAi ? 'PAGE_AI_SELECTION' : 'PROOFREAD_SELECTION',
         text: selectedText
       });
     } catch {
-      // Side panel may still be loading its DOM; it will read pendingProofreadText from chrome.storage.local on startup
+      // Side panel may still be loading its DOM; it will read pending state from chrome.storage.local on startup
     }
   } catch (err) {
-    console.error('Context menu proofread error:', err);
+    console.error('Context menu action error:', err);
   }
 });
