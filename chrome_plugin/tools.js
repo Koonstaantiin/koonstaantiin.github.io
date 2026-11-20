@@ -103,6 +103,8 @@ let currentProofreadState = {
   displayMode: 'wavy', // 'wavy' | 'inline'
   strictC1C2: true, // Cambridge CAE/CPE 12-pillar strict mode
   quickMode: true, // true = Instant Quick Mode (only corrected_text), false = 4 Styles + rules
+  lastElapsedSec: '',
+  lastModelUsed: '',
   error: null,
   isLoading: false,
   isExplainingRules: false,
@@ -166,20 +168,20 @@ function isDeprecatedGeminiModel(modelId) {
 
 function getProofreadModelCandidates() {
   const currentModels = [
-    'gemini-3.5-flash-lite',
     'gemini-3.1-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
     'gemini-3.8-flash',
-    'gemini-4-argon',
-    'gemini-4-carbon'
+    'gemini-4-argon'
   ];
   const extModelEl = document.getElementById('extModelSelect');
-  const rawPreferred = (extModelEl && extModelEl.value) || 'gemini-3.5-flash-lite';
+  const rawPreferred = (extModelEl && extModelEl.value) || 'gemini-3.1-flash-lite';
   const preferredModel = isDeprecatedGeminiModel(rawPreferred)
-    ? 'gemini-3.5-flash-lite'
+    ? 'gemini-3.1-flash-lite'
     : rawPreferred;
 
   if (extModelEl && isDeprecatedGeminiModel(extModelEl.value)) {
-    extModelEl.value = 'gemini-3.5-flash-lite';
+    extModelEl.value = 'gemini-3.1-flash-lite';
   }
 
   return [...new Set([preferredModel, ...currentModels])].filter(
@@ -286,16 +288,15 @@ function buildProofreadSystemInstruction(strictC1C2 = true, quickMode = true) {
    Виправляй реальні граматичні, орфографічні, пунктуаційні та лексичні помилки, але зберігай природні розмовні конструкції, якщо вони прийнятні в живому спілкуванні.`;
 
   if (quickMode) {
-    return `Ти — професійний лінгвіст-редактор${strictC1C2 ? ', екзаменатор рівня Cambridge C1/C2 (CAE/CPE)' : ''} та коректор (рівень Grammarly Pro / DeepL Write).
-Твоє завдання — МИТТЄВО виправити всі граматичні, орфографічні, пунктуаційні, лексичні та семантико-граматичні помилки в оригінальному тексті у базовому стилі "Стандарт" (зі збереженням початкового тону, мови та структури автора).${cambridgeTaxonomyBlock}
+    const compactC1C2Rule = strictC1C2
+      ? 'Apply strict Cambridge C1/C2 (CAE/CPE) grammar: Unreal Past (It\'s time we left, I\'d rather you didn\'t, wish/if only), Modal Idioms (had better = urgent warning vs would rather / would just as soon = preference, needn\'t have done), Mandative Subjunctive (suggest that smb do), Inversion (Hardly had I..., Not until... did I), Mixed/Inverted Conditionals, Prepositional to+V-ing, Participle alignment, Despite (no "of"), Extreme adjectives (absolutely exhausted), and Slavic/Ukrainian L1 preposition/collocation fixes.'
+      : 'Fix grammar, spelling, punctuation, and natural wording while keeping the author\'s original tone.';
 
-Поверни ВИКЛЮЧНО мінімальний JSON-об'єкт (без жодних пояснень правил — лише виправлений текст):
-{
-  "detected_language": "uk" | "en" | "ru" | "other",
-  "corrected_text": "виправлений текст мовою оригіналу"
-}
-
-ВАЖЛИВО: Не перекладай текст іншою мовою і не додавай жодних префіксів чи коментарів.`;
+    return `You are an ultra-fast expert proofreader and editor.
+Fix all errors in the text while preserving its original language, tone, and structure.
+${compactC1C2Rule}
+Return ONLY compact JSON: {"detected_language":"uk|en|ru|other","corrected_text":"..."}
+Never translate the text or add commentary.`;
   }
 
   return `Ти — професійний лінгвіст-редактор${strictC1C2 ? ', екзаменатор рівня Cambridge C1/C2 (CAE/CPE)' : ''} та коректор (рівень Grammarly Pro / LanguageTool для української, англійської та інших мов).
@@ -867,6 +868,49 @@ async function fetchWithAttemptTimeout(url, options, timeoutMs, externalSignal =
   }
 }
 
+function getFastThinkingLevelForModel(modelId) {
+  const id = String(modelId || '');
+  // Official docs: *-lite and gemini-3.6-flash support 'minimal'; gemini-3.8-flash & gemini-4-argon require 'low'
+  if (id.includes('lite') || id === 'gemini-3.6-flash') return 'minimal';
+  return 'low';
+}
+
+function buildInteractionsRequestBody(modelId, sysInstruction, userPrompt, jsonSchema) {
+  return JSON.stringify({
+    model: modelId,
+    store: false,
+    system_instruction: sysInstruction,
+    input: userPrompt,
+    response_format: {
+      type: 'text',
+      mime_type: 'application/json',
+      schema: jsonSchema
+    },
+    generation_config: {
+      thinking_level: getFastThinkingLevelForModel(modelId),
+      thinking_summaries: 'none'
+    }
+  });
+}
+
+function buildGenerateContentFallbackBody(modelId, sysInstruction, userPrompt, includeThinking = true) {
+  const generationConfig = {
+    responseMimeType: 'application/json'
+  };
+  if (includeThinking) {
+    generationConfig.thinkingConfig = {
+      thinkingLevel: getFastThinkingLevelForModel(modelId).toUpperCase()
+    };
+  }
+  return JSON.stringify({
+    systemInstruction: { parts: [{ text: sysInstruction }] },
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig
+  });
+}
+
+const cachedProofreadEndpointByModel = {};
+
 async function callGeminiProofreadApi(originalText, signal = null) {
   const apiKey = getProofreadApiKey();
   const strictMode = currentProofreadState.strictC1C2 !== false;
@@ -883,71 +927,56 @@ async function callGeminiProofreadApi(originalText, signal = null) {
     };
   }
 
-  const modelsToTry = getProofreadModelCandidates();
+  const allModels = getProofreadModelCandidates();
+  // Always honor the exact model selected in the dropdown (no silent fallback to another model)
+  const modelsToTry = [allModels[0]];
   const modelErrors = [];
   const sysInstruction = buildProofreadSystemInstruction(strictMode, isQuick);
-  const activeSchema = isQuick ? QUICK_PROOFREAD_RESPONSE_JSON_SCHEMA : PROOFREAD_RESPONSE_JSON_SCHEMA;
-  const perCallTimeoutMs = isQuick ? 26000 : 42000;
+  const perCallTimeoutMs = isQuick ? 12000 : 25000;
 
   const modeHeader = strictMode
-    ? '[РЕЖИМ: CAMBRIDGE C1/C2 STRICT EXAMINER — перевір речення за всіма 12 розділами CAE/CPE Use of English (Unreal Past, Modal Idioms, Inversion, Subjunctive, Conditionals, Collocations)]'
-    : '[РЕЖИМ: СТАНДАРТНА КОРЕКТУРА]';
+    ? '[CAMBRIDGE C1/C2 STRICT]'
+    : '[STANDARD PROOFREAD]';
 
   const userPrompt = isQuick
-    ? `${modeHeader}\n[РЕЖИМ "СТАНДАРТ" (FAST) — ПОВЕРНИ ТІЛЬКИ detected_language ТА corrected_text БЕЗ ДОДАТКОВИХ СТИЛІВ І БЕЗ ПОЯСНЕНЬ]\nВиправ усі помилки в цьому тексті:\n\n"""\n${originalText}\n"""`
-    : `${modeHeader}\n[РЕЖИМ "СТАНДАРТ + 3 ДОДАТКОВІ СТИЛІ" — ПОВЕРНИ detected_language ТА variants (default, short, formal, corp) БЕЗ ПОЯСНЕНЬ ПРАВИЛ]\nВиправ цей текст у базовому стилі default та згенеруй ще 3 стилі (short, formal, corp):\n\n"""\n${originalText}\n"""`;
+    ? `${modeHeader}\nFix all errors and return ONLY JSON {"detected_language":"...","corrected_text":"..."}:\n\n"""\n${originalText}\n"""`
+    : `${modeHeader}\nFix text in default style and generate short, formal, corp in JSON {"detected_language":"...","variants":{...}}:\n\n"""\n${originalText}\n"""`;
 
   for (const modelId of modelsToTry) {
     if (signal && signal.aborted) break;
 
     try {
-      // 1. Primary path: Gemini Interactions API (v1beta/interactions, Api-Revision: 2026-05-20)
-      // Use store: false + thinking_level: "minimal" for instant sub-second turnaround
-      const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
+      const startedAt = performance.now();
+      const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const cachedMode = cachedProofreadEndpointByModel[modelId];
+      let usedMode = cachedMode || 'generateContent';
+
+      // Direct single-hop :generateContent call (eliminates /v1beta/interactions 400 double-hop latency)
       let response = await fetchWithAttemptTimeout(
-        interactionsUrl,
+        generateUrl,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-            'Api-Revision': '2026-05-20'
-          },
-          body: JSON.stringify({
-            model: modelId,
-            store: false,
-            system_instruction: sysInstruction,
-            input: userPrompt,
-            response_format: activeSchema,
-            generation_config: {
-              thinking_config: {
-                thinking_level: 'minimal'
-              }
-            }
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: buildGenerateContentFallbackBody(
+            modelId,
+            sysInstruction,
+            userPrompt,
+            usedMode !== 'generateContent_plain'
+          )
         },
         perCallTimeoutMs,
         signal
       );
 
-      // 2. Automatic fallback to v1beta/models/{model}:generateContent with its own clean timeout
-      if (!response.ok && (response.status === 404 || response.status === 400)) {
-        const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      // If this model rejects thinkingConfig with 400, retry once without thinkingConfig and cache it
+      if (!response.ok && response.status === 400 && usedMode !== 'generateContent_plain') {
+        usedMode = 'generateContent_plain';
         response = await fetchWithAttemptTimeout(
           generateUrl,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: sysInstruction }] },
-              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                thinkingConfig: {
-                  thinkingBudget: 0
-                }
-              }
-            })
+            body: buildGenerateContentFallbackBody(modelId, sysInstruction, userPrompt, false)
           },
           perCallTimeoutMs,
           signal
@@ -962,14 +991,16 @@ async function callGeminiProofreadApi(originalText, signal = null) {
         } catch (e) {}
         const msg = `HTTP ${response.status} (${modelId})${apiErrDetail ? ': ' + apiErrDetail : ''}`;
         modelErrors.push(msg);
-        if (response.status === 404 || response.status === 503) continue;
+        if (response.status === 404 || response.status === 503 || response.status === 429) continue;
         throw new Error(msg);
       }
 
+      cachedProofreadEndpointByModel[modelId] = usedMode;
       const data = await response.json();
       const parsed = extractGeminiJsonObject(data);
       const variants = normalizeVariantsObject(parsed, originalText);
       const grammarExplanation = normalizeGrammarExplanationObject(parsed.grammar_explanation);
+      const elapsedSec = ((performance.now() - startedAt) / 1000).toFixed(2);
 
       return {
         detected_language: parsed.detected_language || 'uk',
@@ -977,10 +1008,15 @@ async function callGeminiProofreadApi(originalText, signal = null) {
         variants,
         applied_rules: Array.isArray(parsed.applied_rules) ? parsed.applied_rules : [],
         grammar_explanation: grammarExplanation,
+        elapsedSec,
+        modelId,
         usedOfflineFallback: false
       };
     } catch (err) {
-      modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
+      const errText = err?.message || 'помилка';
+      modelErrors.push(`${modelId}: ${errText}`);
+      // Fail fast on auth/bad-request/timeout instead of burning another 12-25s on extra models
+      if (/HTTP (400|401|403)\b|таймаут|вичерпано/i.test(errText)) break;
     }
   }
 
@@ -1016,18 +1052,7 @@ async function callGeminiExplainRulesApi(originalText, correctedText) {
             'x-goog-api-key': apiKey,
             'Api-Revision': '2026-05-20'
           },
-          body: JSON.stringify({
-            model: modelId,
-            store: false,
-            system_instruction: sysInstruction,
-            input: userPrompt,
-            response_format: EXPLAIN_RULES_JSON_SCHEMA,
-            generation_config: {
-              thinking_config: {
-                thinking_level: 'minimal'
-              }
-            }
-          })
+          body: buildInteractionsRequestBody(modelId, sysInstruction, userPrompt, EXPLAIN_RULES_JSON_SCHEMA)
         },
         24000
       );
@@ -1039,16 +1064,7 @@ async function callGeminiExplainRulesApi(originalText, correctedText) {
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: sysInstruction }] },
-              contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                thinkingConfig: {
-                  thinkingBudget: 0
-                }
-              }
-            })
+            body: buildGenerateContentFallbackBody(modelId, sysInstruction, userPrompt)
           },
           24000
         );
@@ -1258,6 +1274,8 @@ function persistProofreadSession() {
     displayMode: currentProofreadState.displayMode,
     strictC1C2: currentProofreadState.strictC1C2,
     quickMode: currentProofreadState.quickMode,
+    lastElapsedSec: currentProofreadState.lastElapsedSec || '',
+    lastModelUsed: currentProofreadState.lastModelUsed || '',
     error: currentProofreadState.error,
     usedOfflineFallback: currentProofreadState.usedOfflineFallback
   };
@@ -1312,6 +1330,8 @@ function restoreProofreadSessionSnapshot(saved) {
   if (typeof saved.quickMode === 'boolean') {
     currentProofreadState.quickMode = saved.quickMode;
   }
+  currentProofreadState.lastElapsedSec = typeof saved.lastElapsedSec === 'string' ? saved.lastElapsedSec : '';
+  currentProofreadState.lastModelUsed = typeof saved.lastModelUsed === 'string' ? saved.lastModelUsed : '';
   currentProofreadState.error = typeof saved.error === 'string' && saved.error ? saved.error : null;
   currentProofreadState.usedOfflineFallback = Boolean(saved.usedOfflineFallback);
 
@@ -1416,6 +1436,133 @@ function renderGrammarExplanationView() {
   containerEl.innerHTML = overviewHtml + itemsHtml;
 }
 
+function formatMarkdownInline(rawLine) {
+  const codePlaceholders = [];
+  let text = safeEscapeHtml(rawLine).replace(/`([^`]+)`/g, (_, code) => {
+    const idx = codePlaceholders.length;
+    codePlaceholders.push(`<code class="sp-md-code">${code}</code>`);
+    return `\u0000CODE${idx}\u0000`;
+  });
+
+  text = text
+    .replace(/\*\*\*([^\s*](?:.*?[^\s*])?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*([^\s*](?:.*?[^\s*])?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^\s_](?:.*?[^\s_])?)__/g, '<strong>$1</strong>')
+    .replace(/~~([^\s~](?:.*?[^\s~])?)~~/g, '<del>$1</del>')
+    .replace(/(^|[\s(«"'])\*([^\s*](?:[^*]*?[^\s*])?)\*(?=$|[\s.,;:!?»"')—–-])/g, '$1<em>$2</em>');
+
+  return text.replace(/\u0000CODE(\d+)\u0000/g, (_, i) => codePlaceholders[Number(i)] || '');
+}
+
+function renderMarkdownToHtml(rawMarkdown) {
+  const src = String(rawMarkdown || '').replace(/\r\n?/g, '\n').trim();
+  if (!src) return '';
+
+  const lines = src.split('\n');
+  const htmlBlocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      i++;
+      continue;
+    }
+
+    // Fenced code block ```...```
+    if (trimmed.startsWith('```')) {
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++;
+      htmlBlocks.push(`<pre class="sp-md-pre"><code>${safeEscapeHtml(codeLines.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    // Horizontal rule (---, ***, ___)
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      htmlBlocks.push('<hr class="sp-md-hr">');
+      i++;
+      continue;
+    }
+
+    // Headings (# .. ####)
+    const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const tag = level === 1 ? 'h3' : level === 2 ? 'h4' : level === 3 ? 'h5' : 'h6';
+      htmlBlocks.push(`<${tag} class="sp-md-h sp-md-h${level}">${formatMarkdownInline(headingMatch[2])}</${tag}>`);
+      i++;
+      continue;
+    }
+
+    // Blockquote (> ...)
+    if (/^>\s?/.test(trimmed)) {
+      const quoteLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i].trim())) {
+        quoteLines.push(lines[i].trim().replace(/^>\s?/, ''));
+        i++;
+      }
+      const inner = quoteLines.map(l => formatMarkdownInline(l)).join('<br>');
+      htmlBlocks.push(`<blockquote class="sp-md-quote">${inner}</blockquote>`);
+      continue;
+    }
+
+    // Unordered list (•, -, *)
+    if (/^(?:[•\-*]|\u2022)\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^(?:[•\-*]|\u2022)\s+/.test(lines[i].trim())) {
+        const content = lines[i].trim().replace(/^(?:[•\-*]|\u2022)\s+/, '');
+        items.push(`<li>${formatMarkdownInline(content)}</li>`);
+        i++;
+      }
+      htmlBlocks.push(`<ul class="sp-md-ul">${items.join('')}</ul>`);
+      continue;
+    }
+
+    // Ordered list (1. ...)
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+        const content = lines[i].trim().replace(/^\d+\.\s+/, '');
+        items.push(`<li>${formatMarkdownInline(content)}</li>`);
+        i++;
+      }
+      htmlBlocks.push(`<ol class="sp-md-ol">${items.join('')}</ol>`);
+      continue;
+    }
+
+    // Paragraph (group consecutive plain lines until blank line or next block)
+    const paraLines = [];
+    while (i < lines.length) {
+      const cur = lines[i].trim();
+      if (
+        !cur ||
+        cur.startsWith('```') ||
+        /^(?:-{3,}|\*{3,}|_{3,})$/.test(cur) ||
+        /^#{1,4}\s+/.test(cur) ||
+        /^>\s?/.test(cur) ||
+        /^(?:[•\-*]|\u2022)\s+/.test(cur) ||
+        /^\d+\.\s+/.test(cur)
+      ) {
+        break;
+      }
+      paraLines.push(formatMarkdownInline(cur));
+      i++;
+    }
+    if (paraLines.length > 0) {
+      htmlBlocks.push(`<p class="sp-md-p">${paraLines.join('<br>')}</p>`);
+    }
+  }
+
+  return htmlBlocks.join('');
+}
+
 function renderPageAssistantView() {
   const pa = currentProofreadState.pageAssistant || {};
   const metaEl = document.getElementById('pageAssistantContextMeta');
@@ -1477,7 +1624,7 @@ function renderPageAssistantView() {
       answerBoxEl.innerHTML = `<span class="text-slate-400 italic text-xs">ШІ читає ${hasActiveSelection ? 'виділений фрагмент та контекст сторінки' : 'вміст активної сторінки'} і формує відповідь...</span>`;
     } else if (pa.answer) {
       resultWrapEl.classList.remove('hidden');
-      answerBoxEl.textContent = pa.answer;
+      answerBoxEl.innerHTML = renderMarkdownToHtml(pa.answer);
       if (scopeBadgeEl) {
         if (pa.answeredScope === 'selection') {
           scopeBadgeEl.textContent = '🎯 Виділений фрагмент';
@@ -1502,6 +1649,7 @@ function renderProofreadView() {
   const grammarPanelEl = document.getElementById('grammarExplanationPanel');
   const pagePanelEl = document.getElementById('pageAssistantPanel');
   const badgeCountEl = document.getElementById('proofreadChangesCountBadge');
+  const timingBadgeEl = document.getElementById('proofreadTimingBadge');
   const summaryEl = document.getElementById('proofreadSummaryText');
   const styleNoteEl = document.getElementById('proofreadStyleNote');
   const styleBarEl = document.getElementById('styleVariantBar');
@@ -1604,6 +1752,10 @@ function renderProofreadView() {
       badgeCountEl.textContent = '⏳ Перевірка...';
       badgeCountEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700';
     }
+    if (timingBadgeEl) {
+      timingBadgeEl.classList.add('hidden');
+      timingBadgeEl.textContent = '';
+    }
     resultBoxEl.innerHTML = `<span class="text-slate-400 italic text-xs">${
       isQuick
         ? 'ШІ миттєво перевіряє текст у режимі «🔍 Стандарт»...'
@@ -1622,6 +1774,10 @@ function renderProofreadView() {
     if (badgeCountEl) {
       badgeCountEl.textContent = '⚠️ Помилка запиту';
       badgeCountEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-950/90 text-rose-300 border border-rose-700/70';
+    }
+    if (timingBadgeEl) {
+      timingBadgeEl.classList.add('hidden');
+      timingBadgeEl.textContent = '';
     }
     resultBoxEl.innerHTML = `<span class="text-rose-300 text-xs">❌ Результат не отримано: ${safeEscapeHtml(currentProofreadState.error)}</span>`;
     if (summaryEl) {
@@ -1660,6 +1816,16 @@ function renderProofreadView() {
     badgeCountEl.className = countToShow > 0
       ? 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 border border-sky-700/70'
       : 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/70';
+  }
+
+  if (timingBadgeEl) {
+    if (currentProofreadState.lastElapsedSec && currentProofreadState.lastModelUsed) {
+      timingBadgeEl.textContent = `⚡ ${currentProofreadState.lastElapsedSec} с • ${currentProofreadState.lastModelUsed}`;
+      timingBadgeEl.classList.remove('hidden');
+    } else {
+      timingBadgeEl.textContent = '';
+      timingBadgeEl.classList.add('hidden');
+    }
   }
 
   if (summaryEl) {
@@ -1965,49 +2131,39 @@ ${userQuestion}`;
   const modelErrors = [];
 
   for (const modelId of modelsToTry) {
-    const remainingMs = deadline - Date.now();
-    if ((signal && signal.aborted) || remainingMs < 1500) break;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), remainingMs);
-    const onAbort = () => controller.abort();
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    if (signal && signal.aborted) break;
 
     try {
       const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
-      let response = await fetch(interactionsUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-          'Api-Revision': '2026-05-20'
+      let response = await fetchWithAttemptTimeout(
+        interactionsUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+            'Api-Revision': '2026-05-20'
+          },
+          body: buildInteractionsRequestBody(modelId, sysInstruction, userPrompt, PAGE_ASSISTANT_JSON_SCHEMA)
         },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: modelId,
-          system_instruction: sysInstruction,
-          input: userPrompt,
-          response_format: PAGE_ASSISTANT_JSON_SCHEMA
-        })
-      });
+        26000,
+        signal
+      );
 
       if (!response.ok && (response.status === 404 || response.status === 400)) {
         const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        response = await fetch(generateUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: sysInstruction }] },
-            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-            generationConfig: {
-              responseMimeType: 'application/json'
-            }
-          })
-        });
+        response = await fetchWithAttemptTimeout(
+          generateUrl,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: buildGenerateContentFallbackBody(modelId, sysInstruction, userPrompt)
+          },
+          26000,
+          signal
+        );
       }
 
-      clearTimeout(timeoutId);
       if (!response.ok) {
         let apiErrDetail = '';
         try {
@@ -2027,10 +2183,7 @@ ${userQuestion}`;
         answered_scope: hasPrioritySelection ? 'selection' : (parsed.answered_scope === 'selection' ? 'selection' : 'page')
       };
     } catch (err) {
-      clearTimeout(timeoutId);
       modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
-    } finally {
-      if (signal) signal.removeEventListener('abort', onAbort);
     }
   }
 
@@ -2098,6 +2251,8 @@ async function runProofreadTool(customText = null) {
 
   currentProofreadState.originalText = textToFix;
   currentProofreadState.error = null;
+  currentProofreadState.lastElapsedSec = '';
+  currentProofreadState.lastModelUsed = '';
   currentProofreadState.isLoading = true;
   renderProofreadView();
 
@@ -2109,6 +2264,8 @@ async function runProofreadTool(customText = null) {
     currentProofreadState.variants = res.variants;
     currentProofreadState.appliedRules = res.applied_rules || [];
     currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(res.grammar_explanation);
+    currentProofreadState.lastElapsedSec = res.elapsedSec || '';
+    currentProofreadState.lastModelUsed = res.modelId || '';
     currentProofreadState.usedOfflineFallback = Boolean(res.usedOfflineFallback);
 
     if (res.isUnconfiguredCustomText) {
@@ -2130,6 +2287,8 @@ async function runProofreadTool(customText = null) {
     };
     currentProofreadState.appliedRules = [];
     currentProofreadState.grammarExplanation = normalizeGrammarExplanationObject(null);
+    currentProofreadState.lastElapsedSec = '';
+    currentProofreadState.lastModelUsed = '';
     currentProofreadState.usedOfflineFallback = false;
     notifyProofreadToast(`❌ ${errMsg}`);
   } finally {
@@ -2173,6 +2332,8 @@ function applyInitialProofreadData(presetText) {
   const initialResult = simulateProofreadPipeline(presetText);
   currentProofreadState.originalText = presetText;
   currentProofreadState.error = null;
+  currentProofreadState.lastElapsedSec = '';
+  currentProofreadState.lastModelUsed = '';
   currentProofreadState.detectedLanguage = initialResult.detected_language;
   currentProofreadState.summary = initialResult.summary;
   currentProofreadState.variants = normalizeVariantsObject(initialResult, presetText);
@@ -2457,8 +2618,23 @@ function updateExtKeyStatusBadge(hasKey) {
 function initChromeSidePanelExtras() {
   const extKeyInput = document.getElementById('extApiKeyInput');
   const extSaveKeyBtn = document.getElementById('btnExtSaveKey');
+  const extModelSelect = document.getElementById('extModelSelect');
   const extGrabBtn = document.getElementById('btnGrabPageSelection');
   const inputEl = document.getElementById('proofreadOriginalInput');
+
+  if (extModelSelect) {
+    try {
+      const savedModel = localStorage.getItem('chomuchka_ext_model');
+      if (savedModel && Array.from(extModelSelect.options).some(opt => opt.value === savedModel)) {
+        extModelSelect.value = savedModel;
+      }
+    } catch (e) {}
+    extModelSelect.addEventListener('change', () => {
+      try {
+        localStorage.setItem('chomuchka_ext_model', extModelSelect.value);
+      } catch (e) {}
+    });
+  }
 
   // Auto-sync live selection from the active tab when hovering/focusing Side Panel or periodically
   window.addEventListener('focus', () => syncActiveTabSelection());
