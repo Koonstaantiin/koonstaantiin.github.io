@@ -1,6 +1,8 @@
 # AGENTS.md — Fast Architecture & Codebase Map for «Чомучка-Рація»
 
 > **Purpose**: Read this file first to avoid scanning the entire repository. It documents every file, global symbol, state flow, and styling rule so you only need to read the 1–2 files directly affected by a task.
+>
+> **🚨 MANDATORY PRE-FLIGHT GIT RULE**: Before starting any work or making any edits, check if there are incoming remote commits to pull (`git status -sb` showing `[behind N]`). If there is anything to pull, you **MUST** notify the user immediately and **STOP working** before making any other changes, so that all incoming changes are pulled/merged first.
 
 ---
 
@@ -32,7 +34,7 @@
 | `js/camera.js` | 8 | Single-shot child photo camera & virtual canvas scenes (`VIRTUAL_CAMERA_SCENES`, `openChildCameraModal()`, `closeChildCameraModal()`, `selectCameraScene()`, `takeCameraPhoto()`, `drawVirtualSceneToCanvas()`). |
 | `js/ui.js` | 9 | DOM rendering & `DOMContentLoaded` listeners (`renderStarsAndCounters()`, `renderLogsList()`, `switchParentTab()`, `escapeHtml()`). |
 | `sw.js` | — | Service Worker caching `ASSETS_TO_CACHE` for offline PWA support. |
-| `chrome_plugin/*` | — | Standalone Chrome Side Panel Extension (`manifest.json`, `background.js`, `sidepanel.html`, `sidepanel.css`, `tools.js`) for AI Proofreading & 4-Style Rewrite (`default`, `short`, `formal`, `corp`). |
+| `chrome_plugin/*` | — | Standalone Chrome Side Panel Extension (`manifest.json`, `background.js`, `sidepanel.html`, `sidepanel.css`, `ext_state.js`, `ext_diff.js`, `ext_proofread.js`, `ext_page_ai.js`, `ext_ui.js`) for AI Proofreading, 4-Style Rewrite (`default`, `short`, `formal`, `corp`), Grammar Explanation, and Selection-Aware Page AI Assistant. |
 
 ---
 

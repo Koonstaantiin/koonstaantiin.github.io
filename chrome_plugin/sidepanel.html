@@ -173,12 +173,15 @@
           <div id="grammarExplanationContainer" class="space-y-2"></div>
         </div>
 
-        <!-- TAB 3 PANEL: Page Assistant (Selection-Aware) -->
+        <!-- TAB 3 PANEL: Page Assistant (Selection-Aware + Context Cache) -->
         <div id="pageAssistantPanel" class="space-y-2.5 hidden">
           <div class="sp-rules-header">
-            <span class="text-[11px] font-extrabold text-emerald-300 uppercase">🌐 Page Assistant</span>
-            <button id="btnRefreshPageContext" type="button" class="ext-chip-btn" title="Зчитати актуальний текст та виділення з активної вкладки">
-              🔄 Оновити контекст
+            <div class="flex items-center gap-1.5">
+              <span class="text-[11px] font-extrabold text-emerald-300 uppercase">🌐 Page Assistant</span>
+              <span id="pageAssistantCacheBadge" class="sp-cache-badge">🆕 Кеш порожній</span>
+            </div>
+            <button id="btnRefreshPageContext" type="button" class="ext-chip-btn" title="Скинути кеш сторінки та зчитати актуальний текст і виділення заново">
+              🔄 Скинути кеш
             </button>
           </div>
 
@@ -248,6 +251,10 @@
   <!-- Toast Banner -->
   <div id="extToastBanner" class="sp-toast hidden"></div>
 
-  <script src="./tools.js"></script>
+  <script src="./ext_state.js"></script>
+  <script src="./ext_diff.js"></script>
+  <script src="./ext_proofread.js"></script>
+  <script src="./ext_page_ai.js"></script>
+  <script src="./ext_ui.js"></script>
 </body>
 </html>
