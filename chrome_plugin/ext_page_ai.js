@@ -447,41 +447,73 @@ ${pageContext.bodyText || '(Текст сторінки порожній)'}
   const fullUserPrompt = `${staticPagePrefix}\n${historyBlock}${dynamicQuestionSuffix}`;
 
   const modelsToTry = getProofreadModelCandidates();
-  const deadline = Date.now() + 26000;
+  const perCallTimeoutMs = 45000;
   const modelErrors = [];
 
-  for (const modelId of modelsToTry) {
-    const remainingMs = deadline - Date.now();
-    if ((signal && signal.aborted) || remainingMs < 1500) break;
+  const getThinkingLevel = (id) => (
+    typeof getFastThinkingLevelForModel === 'function'
+      ? getFastThinkingLevelForModel(id)
+      : (String(id || '').includes('lite') || id === 'gemini-3.6-flash' ? 'minimal' : 'low')
+  );
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), remainingMs);
-    const onAbort = () => controller.abort();
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  const buildPageInteractionPayload = (modelId, inputPrompt, prevId = null) => JSON.stringify({
+    model: modelId,
+    store: true,
+    ...(prevId ? { previous_interaction_id: prevId } : {}),
+    system_instruction: sysInstruction,
+    input: inputPrompt,
+    response_format: {
+      type: 'text',
+      mime_type: 'application/json',
+      schema: PAGE_ASSISTANT_JSON_SCHEMA
+    },
+    generation_config: {
+      thinking_level: getThinkingLevel(modelId),
+      thinking_summaries: 'none'
+    }
+  });
+
+  const buildPageGeneratePayload = (modelId, includeThinking = true) => {
+    const generationConfig = {
+      responseMimeType: 'application/json'
+    };
+    if (includeThinking) {
+      generationConfig.thinkingConfig = {
+        thinkingLevel: getThinkingLevel(modelId).toUpperCase()
+      };
+    }
+    return JSON.stringify({
+      systemInstruction: { parts: [{ text: sysInstruction }] },
+      contents: [{ role: 'user', parts: [{ text: fullUserPrompt }] }],
+      generationConfig
+    });
+  };
+
+  for (const modelId of modelsToTry) {
+    if (signal && signal.aborted) break;
 
     try {
       const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
+      const interactionsHeaders = {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+        'Api-Revision': '2026-05-20'
+      };
       let response = null;
 
       // 1A. Stateful Multi-Turn Follow-up via Interactions API (`previous_interaction_id`):
       // Avoids resending the 28,000-character page text on 2nd, 3rd, Nth questions for the same page!
       if (pageContextCache.interactionId && pageContextCache.modelId === modelId) {
-        response = await fetch(interactionsUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-            'Api-Revision': '2026-05-20'
+        response = await fetchWithAttemptTimeout(
+          interactionsUrl,
+          {
+            method: 'POST',
+            headers: interactionsHeaders,
+            body: buildPageInteractionPayload(modelId, dynamicQuestionSuffix, pageContextCache.interactionId)
           },
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: modelId,
-            previous_interaction_id: pageContextCache.interactionId,
-            system_instruction: sysInstruction,
-            input: dynamicQuestionSuffix,
-            response_format: PAGE_ASSISTANT_JSON_SCHEMA
-          })
-        });
+          perCallTimeoutMs,
+          signal
+        );
 
         if (!response.ok) {
           // Session expired or unsupported -> clear interactionId and fall back to full Static-Prefix-First request
@@ -492,41 +524,47 @@ ${pageContext.bodyText || '(Текст сторінки порожній)'}
 
       // 1B. Initial Interaction (or when previous_interaction_id was not used): send Static-Prefix-First prompt
       if (!response) {
-        response = await fetch(interactionsUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-            'Api-Revision': '2026-05-20'
+        response = await fetchWithAttemptTimeout(
+          interactionsUrl,
+          {
+            method: 'POST',
+            headers: interactionsHeaders,
+            body: buildPageInteractionPayload(modelId, fullUserPrompt, null)
           },
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: modelId,
-            system_instruction: sysInstruction,
-            input: fullUserPrompt,
-            response_format: PAGE_ASSISTANT_JSON_SCHEMA
-          })
-        });
+          perCallTimeoutMs,
+          signal
+        );
       }
 
       // 2. Fallback to generateContent (automatically benefits from Static-Prefix-First Implicit Context Caching)
       if (!response.ok && (response.status === 404 || response.status === 400)) {
         const generateUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        response = await fetch(generateUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: sysInstruction }] },
-            contents: [{ role: 'user', parts: [{ text: fullUserPrompt }] }],
-            generationConfig: {
-              responseMimeType: 'application/json'
-            }
-          })
-        });
+        response = await fetchWithAttemptTimeout(
+          generateUrl,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: buildPageGeneratePayload(modelId, true)
+          },
+          perCallTimeoutMs,
+          signal
+        );
+
+        // If this model rejects thinkingConfig with 400, retry once without thinkingConfig
+        if (!response.ok && response.status === 400) {
+          response = await fetchWithAttemptTimeout(
+            generateUrl,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: buildPageGeneratePayload(modelId, false)
+            },
+            perCallTimeoutMs,
+            signal
+          );
+        }
       }
 
-      clearTimeout(timeoutId);
       if (!response.ok) {
         let apiErrDetail = '';
         try {
@@ -535,7 +573,7 @@ ${pageContext.bodyText || '(Текст сторінки порожній)'}
         } catch (e) {}
         const msg = `HTTP ${response.status} (${modelId})${apiErrDetail ? ': ' + apiErrDetail : ''}`;
         modelErrors.push(msg);
-        if (response.status === 404 || response.status === 503) continue;
+        if (response.status === 404 || response.status === 503 || response.status === 429) continue;
         throw new Error(msg);
       }
 
@@ -566,10 +604,9 @@ ${pageContext.bodyText || '(Текст сторінки порожній)'}
         answered_scope: finalScope
       };
     } catch (err) {
-      clearTimeout(timeoutId);
-      modelErrors.push(`${modelId}: ${err.message || 'помилка'}`);
-    } finally {
-      if (signal) signal.removeEventListener('abort', onAbort);
+      const errText = err?.message || 'помилка';
+      modelErrors.push(`${modelId}: ${errText}`);
+      if (/HTTP (401|403)\b|Запит скасовано/i.test(errText)) break;
     }
   }
 
@@ -602,6 +639,7 @@ async function runPageAssistantQuery(customPrompt = null) {
   }
 
   pa.prompt = question;
+  pa.answeredScope = hasPrioritySelection ? 'selection' : 'page';
   pa.isLoading = true;
   if (typeof renderPageAssistantView === 'function') {
     renderPageAssistantView();
